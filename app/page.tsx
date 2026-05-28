@@ -71,6 +71,12 @@ const cuisineEmojis: Record<string, string> = {
   Indienne:'🍛', Française:'🥐', Libanaise:'🫒', Espagnole:'🥘', Autre:'🍽️'
 }
 
+// ── INPUT COMPONENT (hors du composant principal pour éviter le re-render) ──
+const Inp = ({ placeholder, value, onChange, type = 'text' }: { placeholder: string, value: string, onChange: (v: string) => void, type?: string }) => (
+  <input type={type} placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)}
+    style={{ width: '100%', border: '1.5px solid #EDE8E0', borderRadius: 10, padding: '0.65rem 0.9rem', fontSize: '0.92rem', outline: 'none', marginBottom: '0.8rem', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+)
+
 export default function HomEat() {
   const [page, setPage] = useState('home')
   const [prevPage, setPrevPage] = useState('home')
@@ -365,9 +371,10 @@ export default function HomEat() {
   const discounted = promoApplied ? total - Math.round((selectedMeal?.price_per_seat || 0) * guests * 0.1) : total
 
   // ── COMPONENTS ──
+  const inpStyle = { width: '100%', border: `1.5px solid ${s.border}`, borderRadius: 10, padding: '0.65rem 0.9rem', fontSize: '0.92rem', outline: 'none', marginBottom: '0.8rem', fontFamily: 'inherit', boxSizing: 'border-box' as const }
+
   const Inp = ({ placeholder, value, onChange, type = 'text' }: any) => (
-    <input type={type} placeholder={placeholder} value={value} onChange={(e: any) => onChange(e.target.value)}
-      style={{ width: '100%', border: `1.5px solid ${s.border}`, borderRadius: 10, padding: '0.65rem 0.9rem', fontSize: '0.92rem', outline: 'none', marginBottom: '0.8rem', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+    <input type={type} placeholder={placeholder} value={value} onChange={(e: any) => onChange(e.target.value)} style={inpStyle} />
   )
 
   const MealCard = ({ m }: { m: Meal }) => {
@@ -822,6 +829,33 @@ export default function HomEat() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ══ MAP ══ */}
+      {page === 'map' && (
+        <div style={{ padding: '1.5rem 2rem', maxWidth: 1100, margin: '0 auto' }}>
+          <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>🗺️ Carte des repas</h2>
+          <div style={{ borderRadius: 16, overflow: 'hidden', height: 380, background: 'linear-gradient(180deg, #c8e6c9, #a5d6a7)', position: 'relative', marginBottom: '1.5rem' }}>
+            <div style={{ position: 'absolute', inset: 0, opacity: 0.4, backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 39px, #81c784 39px, #81c784 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, #81c784 39px, #81c784 40px)' }} />
+            {meals.length === 0 && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ fontSize: '3rem' }}>🗺️</div>
+                <p style={{ color: s.mid, fontWeight: 600 }}>Aucun repas à afficher sur la carte</p>
+              </div>
+            )}
+            {meals.map((m, i) => (
+              <div key={m.id} onClick={() => { setSelectedMeal(m); setGuests(1); loadMealReviews(m.id); nav('detail') }}
+                style={{ position: 'absolute', left: `${10 + (i * 17) % 75}%`, top: `${15 + (i * 23) % 60}%`, transform: 'translate(-50%, -100%)', cursor: 'pointer', zIndex: 10 }}>
+                <div style={{ background: s.terra, color: '#fff', borderRadius: 999, padding: '0.2rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap', boxShadow: '0 3px 12px rgba(196,98,45,0.4)' }}>
+                  {m.photo_url || '🍽️'} {m.price_per_seat}€
+                </div>
+                <div style={{ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: `8px solid ${s.terra}`, margin: '0 auto' }} />
+              </div>
+            ))}
+          </div>
+          <h3 style={{ fontWeight: 700, marginBottom: '1rem' }}>Repas à proximité</h3>
+          <Grid data={meals.slice(0, 4)} />
         </div>
       )}
 
