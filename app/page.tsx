@@ -997,7 +997,7 @@ export default function Shareat() {
             <p className="eyebrow reveal">Les règles en chiffres</p>
             <h2 className="title reveal">Simple et sans surprise</h2>
             <div className="cards">
-              {([[Math.round(COMMISSION_RATE * 100), ' %', 'de commission prise par Shareat sur chaque place, pour le paiement sécurisé et le service client (taux provisoire).'], [FREE_CANCELLATION_HOURS, ' h', 'avant le repas : jusque-là, l’annulation est gratuite et remboursée en entier.'], [14, '', 'allergènes majeurs que chaque hôte doit déclarer pour chaque repas.'], [STUDENT_MAX_PRICE, ' €', 'maximum pour un repas étudiant. Bien manger, petit budget.']] as [number, string, string][]).map(([n, suf, d], i) => (
+              {([[FREE_CANCELLATION_HOURS, ' h', 'avant le repas : jusque-là, l’annulation est gratuite et remboursée en entier.'], [14, '', 'allergènes majeurs que chaque hôte doit déclarer pour chaque repas.'], [STUDENT_MAX_PRICE, ' €', 'maximum pour un repas étudiant. Bien manger, petit budget.']] as [number, string, string][]).map(([n, suf, d], i) => (
                 <div key={d} className="info-card glass reveal" style={{ ['--d' as string]: `${i * 0.06}s` }}>
                   <Counter to={n} suffix={suf} />
                   <p>{d}</p>
