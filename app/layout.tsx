@@ -1,25 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Fraunces } from "next/font/google";
+import { Italiana, Manrope } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const italiana = Italiana({
+  variable: "--font-italiana",
   subsets: ["latin"],
+  weight: "400",
 });
 
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const manrope = Manrope({
+  variable: "--font-manrope",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Shareat — Dînez chez l'habitant",
-  description: "Trouvez un hôte qui partage sa table, sa cuisine et son histoire.",
+  title: "Shareat — Tables d'hôtes chez l'habitant",
+  description: "Réservez une place chez un hôte près de chez vous : cuisine maison et rencontres.",
 };
 
 export default function RootLayout({
@@ -28,11 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="fr"
-      className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="fr" className={`${italiana.variable} ${manrope.variable}`}>
+      <body>{children}</body>
     </html>
   );
 }

@@ -1,4 +1,5 @@
 'use client'
+/* eslint-disable @next/next/no-img-element */
 
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
@@ -66,35 +67,45 @@ type Review = {
 type ConvUser = { id: string; name: string }
 type Conversation = ConvUser & { lastMsg: string }
 
-type Page = 'home' | 'explore' | 'detail' | 'messages' | 'dashboard' | 'map' | 'become'
+type Page = 'home' | 'explore' | 'detail' | 'messages' | 'dashboard' | 'become'
 type DashTab = 'overview' | 'bookings' | 'favorites' | 'profile' | 'host'
 
 // ═════════════════════════════ HELPERS ═════════════════════════════
 
-const s = {
-  terra: '#1E5AA8', sage: '#6E7D2C', cream: '#FBF6EC',
-  dark: '#1B2A3A', mid: '#6B6352', border: '#EADFCB',
-  ocre: '#E0A43A', olive: '#8A9A3B',
+/** Photo Unsplash (licence Unsplash : usage libre, commercial compris). */
+const unsplash = (id: string, w = 900) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&q=70`
+
+const HERO_PHOTO = '1528605248644-14dd04022da1'
+const HOST_PHOTO = '1556910103-1c02745aae4d'
+
+/** Illustration par défaut selon la cuisine, quand l'hôte n'a pas fourni de photo. */
+const cuisinePhotos: Record<string, string> = {
+  Marocaine: '1541518763669-27fef04b14ea',
+  Italienne: '1473093295043-cdd812d0e601',
+  Japonaise: '1569718212165-3a8278d5f624',
+  Mexicaine: '1565299585323-38d6b0865b47',
+  Indienne: '1585937421612-70a008356fbe',
+  Française: '1467003909585-2f8a72700288',
+  Libanaise: '1511690656952-34342bb7c2f2',
+  Espagnole: '1534080564583-6be75777b70a',
+  Autre: '1414235077428-338989a2e8c0',
 }
+const CUISINES = Object.keys(cuisinePhotos)
 
-const SERVICE_FEE = 2
-const PROMO_CODE = 'SHAREAT10'
-const PROMO_RATE = 0.1
+const isHttpsUrl = (v?: string | null) => Boolean(v && /^https:\/\/\S+$/i.test(v.trim()))
+const mealPhoto = (m: Pick<Meal, 'photo_url' | 'cuisine'>, w = 900) =>
+  isHttpsUrl(m.photo_url) ? m.photo_url!.trim() : unsplash(cuisinePhotos[m.cuisine] || cuisinePhotos.Autre, w)
 
-const avatarColors = ['#1E5AA8', '#2F7FC1', '#8A9A3B', '#E0A43A', '#C2593A', '#0F6E6E', '#6E7D2C', '#B5832A']
-const getColor = (name?: string | null) => avatarColors[(name?.charCodeAt(0) || 0) % avatarColors.length]
-
-const cuisineEmojis: Record<string, string> = {
-  Marocaine: '🫔', Italienne: '🍕', Japonaise: '🍜', Mexicaine: '🌮',
-  Indienne: '🍛', Française: '🥐', Libanaise: '🫒', Espagnole: '🥘', Autre: '🍽️'
-}
+const avatarTones = ['#A7C7E7', '#8FB3DA', '#C3D7EE', '#7FA3CC', '#B5C9E6', '#9BB8DD']
+const tone = (name?: string | null) => avatarTones[(name?.charCodeAt(0) || 0) % avatarTones.length]
+const initial = (name?: string | null) => (name || '?').trim().charAt(0).toUpperCase() || '?'
 
 /** Arrondi au centime. */
 const money = (n: number) => Math.round((Number(n) || 0) * 100) / 100
-/** Affichage d'un montant : 12, 12,5 → "12", "12,50". */
+/** Affichage d'un montant : 12 → "12 €", 12.5 → "12,50 €". */
 const eur = (n: number) => {
   const v = money(n)
-  return (Number.isInteger(v) ? v.toString() : v.toFixed(2).replace('.', ',')) + '€'
+  return (Number.isInteger(v) ? v.toString() : v.toFixed(2).replace('.', ',')) + ' €'
 }
 
 /** Date du jour au format AAAA-MM-JJ (heure locale). */
@@ -103,28 +114,23 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-const fmtDate = (iso?: string | null) => {
+const fmtDate = (iso?: string | null, long = false) => {
   if (!iso) return ''
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
   if (!y || !m || !d) return iso
-  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', long
+    ? { weekday: 'long', day: 'numeric', month: 'long' }
+    : { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
-const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '')
+const fmtTime = (t?: string | null) => (t ? t.slice(0, 5).replace(':', 'h') : '')
 
 const stars = (rating: number) => {
   const r = Math.max(0, Math.min(5, Math.round(Number(rating) || 0)))
   return '★'.repeat(r) + '☆'.repeat(5 - r)
 }
 
-const ratingLabel = (r: number | null | undefined, empty = '—') => (r && r > 0 ? Number(r).toFixed(1) : empty)
-
-const totals = (price: number, guests: number, promo: boolean) => {
-  const subtotal = money(price * guests)
-  const discount = promo ? money(subtotal * PROMO_RATE) : 0
-  const total = money(subtotal + SERVICE_FEE - discount)
-  return { subtotal, discount, total }
-}
+const seatsLabel = (n: number) => (n > 0 ? `${n} place${n > 1 ? 's' : ''}` : 'Complet')
 
 // ═════════════════════════════ DATA ═════════════════════════════
 
@@ -133,7 +139,7 @@ async function fetchMeals(): Promise<Meal[]> {
     .from('meals')
     .select('*, profiles(full_name, avatar_url, rating, bio)')
     .eq('is_active', true)
-    .order('created_at', { ascending: false })
+    .order('date', { ascending: true })
   if (error) throw error
   const today = todayISO()
   // On masque les repas déjà passés.
@@ -173,16 +179,20 @@ async function fetchHostStats(uid: string) {
   const { data: hostMeals } = await supabase.from('meals').select('id').eq('host_id', uid)
   const ids = (hostMeals || []).map((m: { id: string }) => m.id)
   let revenue = 0
+  let guests = 0
   if (ids.length > 0) {
     // Uniquement les réservations des repas de CET hôte.
     const { data: hostBookings } = await supabase.from('bookings')
-      .select('total_amount')
+      .select('total_amount, seats')
       .in('meal_id', ids)
       .eq('status', 'confirmed')
-    revenue = money((hostBookings || []).reduce((sum: number, b: { total_amount: number | null }) => sum + (Number(b.total_amount) || 0), 0))
+    ;(hostBookings || []).forEach((b: { total_amount: number | null; seats: number | null }) => {
+      revenue += Number(b.total_amount) || 0
+      guests += Number(b.seats) || 0
+    })
   }
   const { data: hostProfile } = await supabase.from('profiles').select('rating').eq('id', uid).maybeSingle()
-  return { meals: ids.length, revenue, rating: Number(hostProfile?.rating) || 0 }
+  return { meals: ids.length, revenue: money(revenue), guests, rating: Number(hostProfile?.rating) || 0 }
 }
 
 async function fetchConversations(uid: string): Promise<Conversation[]> {
@@ -219,8 +229,6 @@ async function fetchMessages(uid: string, otherId: string): Promise<Message[]> {
 // Déclarés HORS du composant principal : sinon ils sont recréés à chaque
 // rendu et les champs perdent le focus à chaque frappe.
 
-const inpStyle = { width: '100%', border: `1.5px solid ${s.border}`, borderRadius: 10, padding: '0.65rem 0.9rem', fontSize: '0.92rem', outline: 'none', marginBottom: '0.8rem', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: '#fff', color: s.dark }
-
 type InpProps = {
   placeholder: string
   value: string
@@ -229,78 +237,71 @@ type InpProps = {
   readOnly?: boolean
   min?: string
   maxLength?: number
-  inputMode?: 'text' | 'numeric' | 'decimal' | 'email'
+  inputMode?: 'text' | 'numeric' | 'decimal' | 'email' | 'url'
   autoComplete?: string
+  label?: string
 }
 
-const Inp = ({ placeholder, value, onChange, type = 'text', readOnly, min, maxLength, inputMode, autoComplete }: InpProps) => (
-  <input type={type} placeholder={placeholder} aria-label={placeholder} value={value} readOnly={readOnly} min={min} maxLength={maxLength}
-    inputMode={inputMode} autoComplete={autoComplete}
-    onChange={e => onChange?.(e.target.value)}
-    style={{ ...inpStyle, ...(readOnly ? { background: s.cream, color: s.mid } : {}) }} />
+const Inp = ({ placeholder, value, onChange, type = 'text', readOnly, min, maxLength, inputMode, autoComplete, label }: InpProps) => (
+  <label className="field">
+    {label && <span className="field-label">{label}</span>}
+    <input className="input" type={type} placeholder={placeholder} aria-label={label || placeholder} value={value} readOnly={readOnly}
+      min={min} maxLength={maxLength} inputMode={inputMode} autoComplete={autoComplete}
+      onChange={e => onChange?.(e.target.value)} />
+  </label>
+)
+
+const HeartIcon = ({ filled }: { filled: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+    <path d="M12 20.5s-7.5-4.6-9.3-9.2C1.5 8.1 3.4 4.5 7 4.5c2.1 0 3.5 1.2 5 3 1.5-1.8 2.9-3 5-3 3.6 0 5.5 3.6 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z" />
+  </svg>
+)
+
+const Avatar = ({ name, size = 36 }: { name?: string | null; size?: number }) => (
+  <span className="avatar" style={{ width: size, height: size, background: tone(name), fontSize: size * 0.4 }}>{initial(name)}</span>
 )
 
 type MealCardProps = { m: Meal; isFav: boolean; onOpen: (m: Meal) => void; onToggleFav: (id: string) => void }
 
-const MealCard = ({ m, isFav, onOpen, onToggleFav }: MealCardProps) => {
-  const hostName = m.profiles?.full_name || 'Hôte'
-  return (
-    <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'transform 0.2s' }}
-      onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-4px)')}
-      onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}>
-      <div onClick={() => onOpen(m)}
-        style={{ height: 170, background: `linear-gradient(135deg, ${getColor(hostName)}88, ${getColor(hostName)})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '3.5rem', position: 'relative' }}>
-        {m.photo_url || '🍽️'}
-        <div style={{ position: 'absolute', top: 10, left: 10, background: '#fff', borderRadius: 999, padding: '0.2rem 0.6rem', fontSize: '0.72rem', fontWeight: 700 }}>
-          ⭐ {ratingLabel(m.rating, 'Nouveau')}
-        </div>
-        <button aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'} onClick={e => { e.stopPropagation(); onToggleFav(m.id) }}
-          style={{ position: 'absolute', top: 10, right: 10, background: '#fff', border: 'none', borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.15)', fontSize: '0.85rem', color: s.terra }}>
-          {isFav ? '❤️' : '♡'}
-        </button>
+const MealCard = ({ m, isFav, onOpen, onToggleFav }: MealCardProps) => (
+  <article className="meal-card" onClick={() => onOpen(m)}>
+    <div className="meal-photo">
+      <img src={mealPhoto(m, 700)} alt={m.title} loading="lazy" />
+      <button className={`fav-btn${isFav ? ' on' : ''}`} aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+        onClick={e => { e.stopPropagation(); onToggleFav(m.id) }}>
+        <HeartIcon filled={isFav} />
+      </button>
+      {(m.rating || 0) > 0 && <span className="meal-rating">★ {Number(m.rating).toFixed(1)}</span>}
+    </div>
+    <div className="meal-body">
+      <h3 className="meal-title">{m.title}</h3>
+      <p className="meal-host">Chez {m.profiles?.full_name || 'votre hôte'}</p>
+      <div className="meal-meta">
+        <span>{m.city}</span><span>·</span><span>{fmtDate(m.date)}</span><span>·</span><span>{seatsLabel(m.available_seats)}</span>
       </div>
-      <div onClick={() => onOpen(m)} style={{ padding: '0.9rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-          <div style={{ width: 24, height: 24, flexShrink: 0, borderRadius: '50%', background: getColor(hostName), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.7rem', fontWeight: 700 }}>
-            {hostName.charAt(0).toUpperCase()}
-          </div>
-          <span style={{ fontSize: '0.78rem', color: s.mid }}>Chez {hostName} · {m.city}</span>
-        </div>
-        <div style={{ fontWeight: 700, marginBottom: '0.35rem', lineHeight: 1.3 }}>{m.title}</div>
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', fontSize: '0.78rem', color: s.mid, marginBottom: '0.6rem' }}>
-          <span>📅 {fmtDate(m.date)}</span>
-          <span>👥 {m.available_seats > 0 ? `${m.available_seats} place${m.available_seats > 1 ? 's' : ''}` : 'Complet'}</span>
-          {m.tags?.slice(0, 2).map(t => <span key={t} style={{ background: s.cream, border: `1px solid ${s.border}`, borderRadius: 999, padding: '0.1rem 0.5rem', fontSize: '0.7rem' }}>{t}</span>)}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${s.border}`, paddingTop: '0.6rem' }}>
-          <span style={{ fontWeight: 800 }}>{eur(m.price_per_seat)} <span style={{ fontWeight: 400, fontSize: '0.75rem', color: s.mid }}>/ couvert</span></span>
-          <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>⭐ {ratingLabel(m.rating)} <span style={{ color: s.mid, fontWeight: 400 }}>({m.reviews_count ?? 0})</span></span>
-        </div>
+      <div className="meal-foot">
+        <span className="meal-cuisine">{m.cuisine}</span>
+        <span className="meal-price">{eur(m.price_per_seat)} <small>/ couvert</small></span>
       </div>
     </div>
-  )
-}
+  </article>
+)
 
 type GridProps = {
   data: Meal[]
   favIds: Set<string>
   loading?: boolean
-  emptyTitle?: string
-  emptyAction?: ReactNode
+  empty?: ReactNode
   onOpen: (m: Meal) => void
   onToggleFav: (id: string) => void
 }
 
-const Grid = ({ data, favIds, loading, emptyTitle, emptyAction, onOpen, onToggleFav }: GridProps) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '1.2rem' }}>
+const Grid = ({ data, favIds, loading, empty, onOpen, onToggleFav }: GridProps) => (
+  <div className="meal-grid">
     {loading
-      ? <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '3rem', color: s.mid }}>⏳ Chargement des repas…</div>
+      ? <div className="empty">Chargement des tables…</div>
       : data.length === 0
-        ? <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '3rem', color: s.mid }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🍽️</div>
-            <p style={{ fontWeight: 700 }}>{emptyTitle || 'Aucun repas disponible pour le moment'}</p>
-            {emptyAction}
-          </div>
+        ? <div className="empty">{empty || 'Aucune table disponible pour le moment.'}</div>
         : data.map(m => <MealCard key={m.id} m={m} isFav={favIds.has(m.id)} onOpen={onOpen} onToggleFav={onToggleFav} />)
     }
   </div>
@@ -321,19 +322,13 @@ export default function Shareat() {
   const [guests, setGuests] = useState(1)
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [showAuth, setShowAuth] = useState(false)
-  const [showPayment, setShowPayment] = useState(false)
-  const [payDone, setPayDone] = useState(false)
+  const [showBooking, setShowBooking] = useState(false)
+  const [bookingDone, setBookingDone] = useState(false)
   const [bookedSeats, setBookedSeats] = useState(0)
   const [toastMsg, setToastMsg] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const [cardNum, setCardNum] = useState('')
-  const [cardExp, setCardExp] = useState('')
-  const [cardCvv, setCardCvv] = useState('')
-  const [cardName, setCardName] = useState('')
-  const [promo, setPromo] = useState('')
-  const [promoApplied, setPromoApplied] = useState(false)
   const [filterCuisine, setFilterCuisine] = useState('all')
   const [searchCity, setSearchCity] = useState('')
   const [appliedCity, setAppliedCity] = useState('')
@@ -353,11 +348,12 @@ export default function Shareat() {
   const [hostDesc, setHostDesc] = useState('')
   const [hostCity, setHostCity] = useState('')
   const [hostMenu, setHostMenu] = useState('')
+  const [hostPhoto, setHostPhoto] = useState('')
   const [profileFname, setProfileFname] = useState('')
   const [profileLname, setProfileLname] = useState('')
   const [profileCity, setProfileCity] = useState('')
   const [profileBio, setProfileBio] = useState('')
-  const [hostStats, setHostStats] = useState({ meals: 0, revenue: 0, rating: 0 })
+  const [hostStats, setHostStats] = useState({ meals: 0, revenue: 0, guests: 0, rating: 0 })
   const [selectedConvUser, setSelectedConvUser] = useState<ConvUser | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const bubblesRef = useRef<HTMLDivElement>(null)
@@ -392,7 +388,7 @@ export default function Shareat() {
   const reloadMeals = () => {
     fetchMeals()
       .then(data => { setMeals(data); setMealsError('') })
-      .catch(() => setMealsError('Impossible de charger les repas.'))
+      .catch(() => setMealsError('Impossible de charger les tables.'))
   }
 
   // ── EFFETS ──
@@ -402,7 +398,7 @@ export default function Shareat() {
     let cancelled = false
     fetchMeals()
       .then(data => { if (!cancelled) setMeals(data) })
-      .catch(() => { if (!cancelled) setMealsError(supabaseConfigured ? 'Impossible de charger les repas.' : 'Supabase n’est pas configuré (variables d’environnement manquantes).') })
+      .catch(() => { if (!cancelled) setMealsError(supabaseConfigured ? 'Impossible de charger les tables.' : 'Supabase n’est pas configuré (variables d’environnement manquantes).') })
       .finally(() => { if (!cancelled) setMealsLoading(false) })
     return () => { cancelled = true }
   }, [])
@@ -494,18 +490,7 @@ export default function Shareat() {
 
   const favIds = useMemo(() => new Set(favMeals.map(m => m.id)), [favMeals])
 
-  const homeStats = useMemo(() => {
-    const hosts = new Set(meals.map(m => m.host_id)).size
-    const rated = meals.filter(m => (m.rating || 0) > 0)
-    const avg = rated.length > 0 ? (rated.reduce((sum, m) => sum + (m.rating || 0), 0) / rated.length).toFixed(1) : '—'
-    const countries = meals.length > 0 ? '1' : '0'
-    return { hosts, avg, countries }
-  }, [meals])
-
-  const { subtotal, discount, total } = selectedMeal
-    ? totals(selectedMeal.price_per_seat, guests, promoApplied)
-    : { subtotal: 0, discount: 0, total: 0 }
-
+  const total = selectedMeal ? money(selectedMeal.price_per_seat * guests) : 0
   const isOwnMeal = Boolean(selectedMeal && user && selectedMeal.host_id === user.id)
   const soldOut = Boolean(selectedMeal && selectedMeal.available_seats <= 0)
 
@@ -514,7 +499,6 @@ export default function Shareat() {
   const openMeal = (m: Meal) => {
     setSelectedMeal(m)
     setGuests(1)
-    setPromo(''); setPromoApplied(false)
     setMealReviews([])
     fetchReviews(m.id).then(setMealReviews)
     nav('detail')
@@ -522,33 +506,35 @@ export default function Shareat() {
 
   const openConversation = (other: ConvUser) => {
     if (!user) { requireAuth('Connectez-vous pour envoyer un message'); return }
-    if (other.id === user.id) { showToast('C’est votre propre repas 🙂'); return }
+    if (other.id === user.id) { showToast('C’est votre propre table'); return }
     if (other.id !== selectedConvUser?.id) setMessages([])
     setSelectedConvUser(other)
     nav('messages')
   }
 
+  const resetFilters = () => { setFilterCuisine('all'); setSearchCity(''); setAppliedCity('') }
+
   const doLogin = async () => {
-    if (!email.trim() || !password) { showToast('⚠️ Email et mot de passe requis'); return }
+    if (!email.trim() || !password) { showToast('Email et mot de passe requis'); return }
     setLoading(true)
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     setLoading(false)
-    if (error) { showToast('❌ ' + error.message); return }
+    if (error) { showToast(error.message); return }
     setShowAuth(false)
-    showToast('👋 Bienvenue !')
+    showToast('Bienvenue')
     setEmail(''); setPassword('')
   }
 
   const doSignup = async () => {
-    if (!fullName.trim()) { showToast('⚠️ Indiquez votre prénom et nom'); return }
-    if (!email.trim()) { showToast('⚠️ Indiquez votre email'); return }
-    if (password.length < 8) { showToast('⚠️ Mot de passe trop court (8 car. min)'); return }
+    if (!fullName.trim()) { showToast('Indiquez votre prénom et votre nom'); return }
+    if (!email.trim()) { showToast('Indiquez votre email'); return }
+    if (password.length < 8) { showToast('Mot de passe trop court (8 caractères minimum)'); return }
     setLoading(true)
     const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: fullName.trim() } } })
     setLoading(false)
-    if (error) { showToast('❌ ' + error.message); return }
+    if (error) { showToast(error.message); return }
     setShowAuth(false)
-    showToast(data.session ? '🎉 Compte créé, bienvenue !' : '🎉 Compte créé ! Vérifiez votre email.')
+    showToast(data.session ? 'Compte créé, bienvenue' : 'Compte créé. Confirmez votre adresse depuis l’email reçu.')
     setEmail(''); setPassword(''); setFullName('')
   }
 
@@ -556,42 +542,26 @@ export default function Shareat() {
     await supabase.auth.signOut()
     nav('home')
     setDashTab('overview')
-    showToast('À bientôt !')
+    showToast('À bientôt')
   }
 
-  const openPayment = () => {
+  const openBooking = () => {
     if (!user) { requireAuth('Connectez-vous pour réserver'); return }
-    if (isOwnMeal) { showToast('Vous ne pouvez pas réserver votre propre repas'); return }
-    if (soldOut) { showToast('Ce repas est complet'); return }
-    setPayDone(false)
-    setShowPayment(true)
-  }
-
-  const resetCard = () => { setCardNum(''); setCardExp(''); setCardCvv(''); setCardName('') }
-
-  const validateCard = () => {
-    if (cardNum.replace(/\s/g, '').length !== 16) return 'Numéro de carte invalide'
-    const m = cardExp.match(/^(\d{2})\/(\d{2})$/)
-    if (!m) return 'Date d’expiration invalide (MM/AA)'
-    const month = Number(m[1]), year = 2000 + Number(m[2])
-    const now = new Date()
-    if (month < 1 || month > 12 || year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1)) return 'Carte expirée ou date invalide'
-    if (!/^\d{3,4}$/.test(cardCvv)) return 'CVV invalide'
-    if (!cardName.trim()) return 'Entrez le nom sur la carte'
-    return ''
+    if (isOwnMeal) { showToast('Vous ne pouvez pas réserver votre propre table'); return }
+    if (soldOut) { showToast('Cette table est complète'); return }
+    setBookingDone(false)
+    setShowBooking(true)
   }
 
   const createBooking = async () => {
     if (!user || !selectedMeal) return
-    const cardError = validateCard()
-    if (cardError) { showToast('⚠️ ' + cardError); return }
     setLoading(true)
     // On revérifie les places restantes juste avant de réserver.
     const { data: fresh } = await supabase.from('meals').select('available_seats').eq('id', selectedMeal.id).maybeSingle()
     const seatsLeft = fresh ? Number(fresh.available_seats) : selectedMeal.available_seats
     if (seatsLeft < guests) {
       setLoading(false)
-      showToast(seatsLeft > 0 ? `⚠️ Plus que ${seatsLeft} place(s) disponible(s)` : '⚠️ Ce repas est complet')
+      showToast(seatsLeft > 0 ? `Plus que ${seatsLeft} place(s) disponible(s)` : 'Cette table est complète')
       setSelectedMeal({ ...selectedMeal, available_seats: Math.max(0, seatsLeft) })
       setGuests(g => Math.max(1, Math.min(g, seatsLeft)))
       return
@@ -605,40 +575,34 @@ export default function Shareat() {
     })
     setLoading(false)
     if (error) {
-      showToast(/places/i.test(error.message) ? '⚠️ Plus assez de places disponibles' : '❌ Erreur : ' + error.message)
+      showToast(/places/i.test(error.message) ? 'Plus assez de places disponibles' : 'Erreur : ' + error.message)
       return
     }
     // Les places restantes sont décrémentées par la base (trigger).
     setBookedSeats(guests)
     setSelectedMeal({ ...selectedMeal, available_seats: seatsLeft - guests })
     setGuests(1)
-    resetCard()
-    setPayDone(true)
+    setBookingDone(true)
     reloadMeals()
   }
 
-  const applyPromo = () => {
-    if (promo.trim().toUpperCase() === PROMO_CODE) { setPromoApplied(true); showToast('🎉 -10% appliqué !') }
-    else { setPromoApplied(false); showToast('❌ Code invalide') }
-  }
-
   const toggleFavorite = async (mealId: string) => {
-    if (!user) { requireAuth('Connectez-vous pour ajouter des favoris'); return }
+    if (!user) { requireAuth('Connectez-vous pour enregistrer des favoris'); return }
     if (favIds.has(mealId)) {
       const { error } = await supabase.from('favorites').delete().eq('user_id', user.id).eq('meal_id', mealId)
-      if (error) { showToast('❌ ' + error.message); return }
+      if (error) { showToast(error.message); return }
       setFavMeals(prev => prev.filter(m => m.id !== mealId))
-      showToast('💔 Retiré des favoris')
+      showToast('Retiré des favoris')
     } else {
       const meal = meals.find(m => m.id === mealId) || (selectedMeal?.id === mealId ? selectedMeal : null)
       if (meal) setFavMeals(prev => [...prev, meal])
       const { error } = await supabase.from('favorites').insert({ user_id: user.id, meal_id: mealId })
       if (error) {
         setFavMeals(prev => prev.filter(m => m.id !== mealId))
-        showToast('❌ ' + error.message)
+        showToast(error.message)
         return
       }
-      showToast('❤️ Ajouté aux favoris')
+      showToast('Ajouté aux favoris')
       fetchFavorites(user.id).then(setFavMeals)
     }
   }
@@ -654,7 +618,7 @@ export default function Shareat() {
       meal_id: selectedMeal && selectedMeal.host_id === selectedConvUser.id ? selectedMeal.id : null
     }).select('*').single()
     setSending(false)
-    if (error) { showToast('❌ ' + error.message); return }
+    if (error) { showToast(error.message); return }
     setMsgInput('')
     const m = data as Message
     setMessages(prev => (prev.some(p => p.id === m.id) ? prev : [...prev, m]))
@@ -664,13 +628,14 @@ export default function Shareat() {
   const publishMeal = async () => {
     if (!user) { requireAuth(); return }
     if (!hostTitle.trim() || !hostPrice || !hostDate || !hostSeats || !hostCity.trim()) {
-      showToast('⚠️ Remplissez tous les champs obligatoires'); return
+      showToast('Remplissez tous les champs obligatoires'); return
     }
     const price = parseFloat(hostPrice.replace(',', '.'))
     const seats = Number(hostSeats)
-    if (!Number.isFinite(price) || price <= 0) { showToast('⚠️ Prix invalide'); return }
-    if (!Number.isInteger(seats) || seats < 1 || seats > 50) { showToast('⚠️ Nombre de couverts invalide (1 à 50)'); return }
-    if (hostDate < todayISO()) { showToast('⚠️ La date doit être aujourd’hui ou plus tard'); return }
+    if (!Number.isFinite(price) || price <= 0) { showToast('Prix invalide'); return }
+    if (!Number.isInteger(seats) || seats < 1 || seats > 50) { showToast('Nombre de couverts invalide (1 à 50)'); return }
+    if (hostDate < todayISO()) { showToast('La date doit être aujourd’hui ou plus tard'); return }
+    if (hostPhoto.trim() && !isHttpsUrl(hostPhoto)) { showToast('Le lien de la photo doit commencer par https://'); return }
     setLoading(true)
     const { error } = await supabase.from('meals').insert({
       host_id: user.id,
@@ -686,20 +651,20 @@ export default function Shareat() {
       menu: hostMenu.split('\n').map(l => l.trim()).filter(Boolean),
       tags: [],
       is_active: true,
-      photo_url: cuisineEmojis[hostCuisine] || '🍽️'
+      photo_url: hostPhoto.trim() || null
     })
     setLoading(false)
-    if (error) { showToast('❌ ' + error.message); return }
-    showToast('🎉 Repas publié avec succès !')
+    if (error) { showToast(error.message); return }
+    showToast('Votre table est publiée')
     reloadMeals()
     fetchHostStats(user.id).then(setHostStats)
-    setHostTitle(''); setHostPrice(''); setHostDate(''); setHostSeats(''); setHostCity(''); setHostDesc(''); setHostMenu('')
+    setHostTitle(''); setHostPrice(''); setHostDate(''); setHostSeats(''); setHostCity(''); setHostDesc(''); setHostMenu(''); setHostPhoto('')
   }
 
   const saveProfile = async () => {
     if (!user) return
     const full_name = `${profileFname.trim()} ${profileLname.trim()}`.trim()
-    if (!full_name) { showToast('⚠️ Indiquez au moins votre prénom'); return }
+    if (!full_name) { showToast('Indiquez au moins votre prénom'); return }
     setLoading(true)
     // update (et non upsert) : la base n'autorise que la modification de son profil.
     const { data, error } = await supabase.from('profiles').update({
@@ -708,617 +673,507 @@ export default function Shareat() {
       bio: profileBio.trim()
     }).eq('id', user.id).select('*').maybeSingle()
     setLoading(false)
-    if (error) { showToast('❌ ' + error.message); return }
+    if (error) { showToast(error.message); return }
     if (data) setProfile(data as Profile)
-    showToast('✅ Profil enregistré !')
+    showToast('Profil enregistré')
   }
 
-  const formatCardNum = (v: string) => v.replace(/\D/g, '').substring(0, 16).replace(/(.{4})/g, '$1 ').trim()
-  const formatCardExp = (v: string) => {
-    const d = v.replace(/\D/g, '').substring(0, 4)
-    return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
-  }
+  // ── RENDU ──
 
   const gridProps = { favIds, onOpen: openMeal, onToggleFav: toggleFavorite }
-  const becomeHostBtn = (
-    <>
-      <p style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>Soyez le premier à proposer votre table !</p>
-      <button onClick={() => nav('become')} style={{ marginTop: '1rem', background: s.sage, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.4rem', fontWeight: 700, cursor: 'pointer' }}>Devenir hôte</button>
-    </>
-  )
-  const noMatchAction = (
-    <button onClick={() => { setFilterCuisine('all'); setSearchCity(''); setAppliedCity('') }} style={{ marginTop: '1rem', background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.4rem', fontWeight: 700, cursor: 'pointer' }}>Réinitialiser les filtres</button>
-  )
-  const filteredEmpty = meals.length > 0
-    ? { emptyTitle: 'Aucun repas ne correspond à votre recherche', emptyAction: noMatchAction }
-    : { emptyTitle: mealsError || undefined, emptyAction: mealsError ? undefined : becomeHostBtn }
+  const emptyState = mealsError
+    ? <p>{mealsError}</p>
+    : meals.length > 0
+      ? <><p>Aucune table ne correspond à votre recherche.</p><button className="btn btn-ghost" onClick={resetFilters}>Réinitialiser les filtres</button></>
+      : <><p className="empty-title">Les premières tables arrivent.</p><p>Shareat vient d’ouvrir : proposez la vôtre et accueillez vos premiers invités.</p><button className="btn btn-primary" onClick={() => nav('become')}>Proposer une table</button></>
 
-  const navLink = (p: Page, label: string, onClick?: () => void) => (
-    <span onClick={onClick || (() => nav(p))} style={{ color: page === p ? s.terra : s.mid, fontWeight: page === p ? 700 : 400, fontSize: '0.88rem', cursor: 'pointer' }}>{label}</span>
+  const cuisineChips = (
+    <div className="chips" role="tablist" aria-label="Cuisine">
+      {['all', ...CUISINES].map(c => (
+        <button key={c} role="tab" aria-selected={filterCuisine === c} className={`chip${filterCuisine === c ? ' on' : ''}`} onClick={() => setFilterCuisine(c)}>
+          {c === 'all' ? 'Toutes' : c}
+        </button>
+      ))}
+    </div>
   )
+
+  const navLink = (p: Page, label: string) => (
+    <button className={`nav-link${page === p ? ' active' : ''}`} onClick={() => nav(p)}>{label}</button>
+  )
+
+  const dashTabs: [DashTab, string][] = [['overview', 'Vue d’ensemble'], ['bookings', 'Réservations'], ['favorites', 'Favoris'], ['profile', 'Mon profil'], ['host', 'Espace hôte']]
 
   return (
-    <div style={{ fontFamily: 'var(--font-geist-sans), system-ui, sans-serif', background: s.cream, minHeight: '100vh', color: s.dark, display: 'flex', flexDirection: 'column', width: '100%' }}>
+    <div className="shell">
 
       {/* ── NAV ── */}
-      <nav className="he-nav" style={{ background: '#fff', borderBottom: `1px solid ${s.border}`, position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-        <div onClick={() => nav('home')} style={{ fontSize: '1.65rem', fontWeight: 700, color: s.terra, cursor: 'pointer', letterSpacing: -0.5, fontFamily: 'var(--font-fraunces), Georgia, serif' }}>
-          Shar<span style={{ color: s.ocre }}>eat</span>
-        </div>
-        <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      <header className="nav">
+        <button className="logo" onClick={() => nav('home')} aria-label="Shareat, accueil">Shareat</button>
+        <nav className="nav-links">
           {navLink('explore', 'Explorer')}
-          {navLink('map', 'Carte')}
           {navLink('messages', 'Messages')}
           {navLink('become', 'Devenir hôte')}
           {user ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <span style={{ fontSize: '0.85rem', color: s.mid }}>{profile?.full_name?.split(' ')[0] || user.email?.split('@')[0]}</span>
-              <div onClick={() => nav('dashboard')} title="Mon tableau de bord"
-                style={{ width: 36, height: 36, borderRadius: '50%', background: s.terra, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '0.9rem' }}>
-                {(profile?.full_name || user.email || '?').charAt(0).toUpperCase()}
-              </div>
-            </div>
+            <button className="nav-user" onClick={() => nav('dashboard')} title="Mon espace">
+              <span className="nav-user-name">{profile?.full_name?.split(' ')[0] || user.email?.split('@')[0]}</span>
+              <Avatar name={profile?.full_name || user.email} size={34} />
+            </button>
           ) : (
-            <div style={{ display: 'flex', gap: '0.6rem' }}>
-              <button onClick={() => { setAuthMode('login'); setShowAuth(true) }} style={{ background: 'transparent', border: `2px solid ${s.terra}`, color: s.terra, borderRadius: 999, padding: '0.4rem 1rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.88rem' }}>Connexion</button>
-              <button onClick={() => { setAuthMode('signup'); setShowAuth(true) }} style={{ background: s.terra, border: 'none', color: '#fff', borderRadius: 999, padding: '0.4rem 1rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.88rem' }}>S&apos;inscrire</button>
-            </div>
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setAuthMode('login'); setShowAuth(true) }}>Connexion</button>
+              <button className="btn btn-primary btn-sm" onClick={() => { setAuthMode('signup'); setShowAuth(true) }}>S’inscrire</button>
+            </>
           )}
-        </div>
-      </nav>
+        </nav>
+      </header>
 
-      <main style={{ flex: 1 }}>
+      <main className="main">
 
-      {/* ══ HOME ══ */}
+      {/* ══ ACCUEIL ══ */}
       {page === 'home' && (
-        <div>
-          <div style={{ background: 'linear-gradient(135deg, #0F2E57 0%, #1E5AA8 55%, #2F8FC9 100%)', padding: '5rem 1.25rem 4rem', textAlign: 'center', color: '#fff' }}>
-            <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 999, padding: '0.3rem 1rem', fontSize: '0.8rem', marginBottom: '1.5rem' }}>🌍 Partagez une table, découvrez une culture</div>
-            <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 3rem)', fontWeight: 900, lineHeight: 1.1, marginBottom: '1rem' }}>Dînez chez l&apos;<span style={{ color: s.ocre }}>habitant</span>,<br />découvrez une culture</h1>
-            <p style={{ fontSize: '1rem', opacity: 0.85, maxWidth: 500, margin: '0 auto 2.5rem' }}>Trouvez un hôte qui partage sa table, sa cuisine et son histoire. Une expérience unique à chaque repas.</p>
-            <form onSubmit={e => { e.preventDefault(); setAppliedCity(searchCity); nav('explore') }}
-              style={{ background: '#fff', color: s.dark, borderRadius: 16, padding: '1.2rem 1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', maxWidth: 680, margin: '0 auto', boxShadow: '0 8px 40px rgba(0,0,0,0.25)', flexWrap: 'wrap', textAlign: 'left' }}>
-              <div style={{ flex: 1, minWidth: 110 }}>
-                <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: '0.25rem' }}>📍 Où ?</div>
-                <input value={searchCity} onChange={e => setSearchCity(e.target.value)} placeholder="Bordeaux, Paris…" aria-label="Ville" style={{ border: 'none', outline: 'none', fontSize: '0.92rem', width: '100%', fontFamily: 'inherit', background: 'transparent' }} />
-              </div>
-              <div style={{ width: 1, height: 36, background: s.border }} />
-              <div style={{ flex: 1, minWidth: 110 }}>
-                <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: '0.25rem' }}>🍴 Cuisine</div>
-                <select value={filterCuisine} onChange={e => setFilterCuisine(e.target.value)} aria-label="Cuisine" style={{ border: 'none', outline: 'none', fontSize: '0.92rem', background: 'transparent', fontFamily: 'inherit', width: '100%' }}>
-                  <option value="all">Toutes</option>
-                  {Object.keys(cuisineEmojis).map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <button type="submit"
-                style={{ background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.7rem 1.5rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem' }}>
-                🔍 Rechercher
-              </button>
-            </form>
-          </div>
+        <>
+          <section className="hero">
+            <img className="hero-bg" src={unsplash(HERO_PHOTO, 2000)} alt="" />
+            <div className="hero-inner">
+              <p className="eyebrow">Tables d’hôtes chez l’habitant</p>
+              <h1 className="display">La table qui <span className="accent">rassemble</span> les cultures</h1>
+              <p className="lead">Réservez une place chez un hôte près de chez vous. Cuisine maison, conversations, et des inconnus qui n’en sont plus à la fin du repas.</p>
+              <form className="search" onSubmit={e => { e.preventDefault(); setAppliedCity(searchCity); nav('explore') }}>
+                <label className="search-field">
+                  <span>Ville</span>
+                  <input value={searchCity} onChange={e => setSearchCity(e.target.value)} placeholder="Bordeaux, Paris…" aria-label="Ville" />
+                </label>
+                <label className="search-field">
+                  <span>Cuisine</span>
+                  <select value={filterCuisine} onChange={e => setFilterCuisine(e.target.value)} aria-label="Cuisine">
+                    <option value="all">Toutes</option>
+                    {CUISINES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+                <button type="submit" className="btn btn-primary">Trouver une table</button>
+              </form>
+            </div>
+          </section>
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '3rem', padding: '1.5rem', background: '#fff', flexWrap: 'wrap' }}>
-            {[['🏠', 'Hôtes actifs', String(homeStats.hosts)], ['🌍', 'Pays couverts', homeStats.countries], ['🍽️', 'Repas proposés', String(meals.length)], ['⭐', 'Note moyenne', homeStats.avg]].map(([icon, label, val]) => (
-              <div key={label} style={{ textAlign: 'center' }}>
-                <strong style={{ display: 'block', fontSize: '1.4rem', color: s.terra, fontWeight: 800 }}>{icon} {val}</strong>
-                <span style={{ fontSize: '0.8rem', color: s.mid }}>{label}</span>
+          <section className="section">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">À venir</p>
+                <h2 className="title">Prochaines tables</h2>
               </div>
-            ))}
-          </div>
+              {meals.length > 0 && <button className="link" onClick={() => nav('explore')}>Tout voir →</button>}
+            </div>
+            {meals.length > 0 && cuisineChips}
+            <Grid data={filtered.slice(0, 8)} loading={mealsLoading} empty={emptyState} {...gridProps} />
+          </section>
 
-          <div className="he-section" style={{ maxWidth: 1100, margin: '0 auto' }}>
-            <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>Explorez par cuisine</h2>
-            <div style={{ display: 'flex', gap: '0.8rem', overflowX: 'auto', paddingBottom: '0.5rem', marginBottom: '2rem' }}>
-              {[['🍽️', 'Tout', 'all'], ...Object.entries(cuisineEmojis).map(([k, v]) => [v, k, k])].map(([icon, label, val]) => (
-                <div key={val} onClick={() => setFilterCuisine(val)}
-                  style={{ flexShrink: 0, background: filterCuisine === val ? '#E8F0FA' : '#fff', border: `2px solid ${filterCuisine === val ? s.terra : s.border}`, borderRadius: 12, padding: '0.6rem 1rem', cursor: 'pointer', textAlign: 'center', minWidth: 80 }}>
-                  <div style={{ fontSize: '1.4rem' }}>{icon}</div>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 600 }}>{label}</div>
+          <section className="section">
+            <p className="eyebrow">Comment ça marche</p>
+            <h2 className="title">Trois étapes, une table</h2>
+            <div className="steps">
+              {[['01', 'Cherchez', 'Filtrez les tables par ville et par cuisine, et découvrez le menu de chaque hôte.'],
+                ['02', 'Échangez', 'Posez vos questions à l’hôte par message avant de réserver.'],
+                ['03', 'Réservez', 'Réservez votre place en ligne, puis réglez votre repas directement auprès de l’hôte.']].map(([n, t, d]) => (
+                <div key={n} className="step">
+                  <span className="step-num">{n}</span>
+                  <h3>{t}</h3>
+                  <p>{d}</p>
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem', gap: '1rem' }}>
-              <h2 style={{ fontWeight: 800 }}>✨ Repas disponibles</h2>
-              <span onClick={() => nav('explore')} style={{ color: s.terra, cursor: 'pointer', fontWeight: 600, fontSize: '0.88rem', whiteSpace: 'nowrap' }}>Voir tout →</span>
-            </div>
-            <Grid data={filtered.slice(0, 4)} loading={mealsLoading} {...filteredEmpty} {...gridProps} />
-          </div>
+          </section>
 
-          <div className="he-section">
-            <div style={{ background: '#fff', borderRadius: 20, padding: '2.5rem 1.5rem', maxWidth: 1060, margin: '0 auto' }}>
-              <h2 style={{ fontWeight: 800, textAlign: 'center', marginBottom: '2rem' }}>Comment ça marche ?</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1.5rem' }}>
-                {[['🔍', '#E8F0FA', 'Cherchez', 'Filtrez par ville, cuisine, budget.'], ['💬', '#E8F5E9', 'Messagez', 'Discutez avec l\'hôte avant.'], ['💳', '#EBF8FF', 'Payez', 'Paiement 100% sécurisé.'], ['🍴', '#FFF8E1', 'Dînez', 'Vivez une expérience unique.'], ['⭐', '#F0E8FF', 'Évaluez', 'Laissez un avis après.']].map(([icon, bg, title, desc]) => (
-                  <div key={title} style={{ textAlign: 'center' }}>
-                    <div style={{ width: 56, height: 56, borderRadius: '50%', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', margin: '0 auto 0.8rem' }}>{icon}</div>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.3rem' }}>{title}</h3>
-                    <p style={{ fontSize: '0.82rem', color: s.mid }}>{desc}</p>
-                  </div>
-                ))}
+          <section className="section">
+            <div className="banner">
+              <img src={unsplash(HOST_PHOTO, 1400)} alt="" />
+              <div className="banner-txt">
+                <p className="eyebrow">Hôtes</p>
+                <h2 className="title">Ouvrez votre table</h2>
+                <p>Partagez votre cuisine, fixez vos dates et votre prix, et rencontrez vos invités.</p>
+                <button className="btn btn-primary" onClick={() => nav('become')}>Devenir hôte</button>
               </div>
             </div>
-          </div>
-
-          <div className="he-section" style={{ maxWidth: 1100, margin: '0 auto' }}>
-            <div style={{ background: 'linear-gradient(135deg, #8A9A3B, #55621F)', borderRadius: 20, padding: '2.5rem', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
-              <div><h2 style={{ fontWeight: 900, marginBottom: '0.5rem' }}>Devenez hôte Shareat</h2><p style={{ opacity: 0.9, maxWidth: 400, fontSize: '0.9rem' }}>Partagez votre passion culinaire et rencontrez des gens du monde entier.</p></div>
-              <button onClick={() => nav('become')} style={{ background: '#fff', color: s.sage, border: 'none', borderRadius: 999, padding: '0.8rem 1.8rem', fontWeight: 700, cursor: 'pointer' }}>Commencer →</button>
-            </div>
-          </div>
-        </div>
+          </section>
+        </>
       )}
 
-      {/* ══ EXPLORE ══ */}
+      {/* ══ EXPLORER ══ */}
       {page === 'explore' && (
-        <div>
-          <div className="he-section" style={{ background: s.terra, color: '#fff' }}>
-            <h1 style={{ fontWeight: 800, marginBottom: '1rem' }}>🍽️ Explorer les repas</h1>
-            <input value={searchCity} onChange={e => { setSearchCity(e.target.value); setAppliedCity(e.target.value) }} placeholder="📍 Filtrer par ville…" aria-label="Filtrer par ville"
-              style={{ width: '100%', maxWidth: 360, border: 'none', borderRadius: 999, padding: '0.55rem 1rem', fontSize: '0.88rem', outline: 'none', fontFamily: 'inherit', marginBottom: '1rem', background: '#fff', color: s.dark }} />
-            <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-              {['all', ...Object.keys(cuisineEmojis)].map(c => (
-                <button key={c} onClick={() => setFilterCuisine(c)}
-                  style={{ background: filterCuisine === c ? '#fff' : 'rgba(255,255,255,0.2)', color: filterCuisine === c ? s.terra : '#fff', border: '1px solid rgba(255,255,255,0.4)', borderRadius: 999, padding: '0.35rem 0.9rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}>
-                  {c === 'all' ? 'Tous' : c}
-                </button>
-              ))}
-            </div>
+        <section className="section">
+          <p className="eyebrow">Explorer</p>
+          <h1 className="title-xl">Toutes les tables</h1>
+          <div className="explore-bar">
+            <input className="input input-pill" value={searchCity} onChange={e => { setSearchCity(e.target.value); setAppliedCity(e.target.value) }} placeholder="Filtrer par ville…" aria-label="Filtrer par ville" />
+            {!mealsLoading && <span className="muted">{filtered.length} table{filtered.length > 1 ? 's' : ''}</span>}
           </div>
-          <div className="he-section" style={{ maxWidth: 1100, margin: '0 auto' }}>
-            {!mealsLoading && <p style={{ color: s.mid, fontSize: '0.88rem', marginBottom: '1.2rem' }}>{filtered.length} repas disponible{filtered.length > 1 ? 's' : ''}</p>}
-            <Grid data={filtered} loading={mealsLoading} {...filteredEmpty} {...gridProps} />
-          </div>
-        </div>
+          {cuisineChips}
+          <Grid data={filtered} loading={mealsLoading} empty={emptyState} {...gridProps} />
+        </section>
       )}
 
-      {/* ══ DETAIL ══ */}
+      {/* ══ DÉTAIL ══ */}
       {page === 'detail' && selectedMeal && (
-        <div>
-          <div style={{ height: 260, background: `linear-gradient(135deg, ${getColor(selectedMeal.profiles?.full_name)}88, ${getColor(selectedMeal.profiles?.full_name)})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '5rem', position: 'relative' }}>
-            <button onClick={goBack} style={{ position: 'absolute', top: '1rem', left: '1rem', background: '#fff', borderRadius: 999, padding: '0.4rem 0.9rem', border: 'none', cursor: 'pointer', fontWeight: 600, color: s.dark }}>← Retour</button>
-            <button onClick={() => toggleFavorite(selectedMeal.id)} aria-label="Favori" style={{ position: 'absolute', top: '1rem', right: '1rem', background: '#fff', borderRadius: 999, padding: '0.4rem 0.9rem', border: 'none', cursor: 'pointer', fontWeight: 600, color: s.terra }}>{favIds.has(selectedMeal.id) ? '❤️ Favori' : '♡ Favori'}</button>
-            {selectedMeal.photo_url || '🍽️'}
-          </div>
-          <div className="he-section" style={{ maxWidth: 780, margin: '0 auto' }}>
-            <h1 style={{ fontSize: '1.7rem', fontWeight: 900, marginBottom: '0.5rem' }}>{selectedMeal.title}</h1>
-            <div style={{ display: 'flex', gap: '0.8rem', color: s.mid, fontSize: '0.88rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-              <span>📍 {selectedMeal.city}</span><span>🍴 {selectedMeal.cuisine}</span>
-              <span>📅 {fmtDate(selectedMeal.date)}{selectedMeal.time ? ` à ${fmtTime(selectedMeal.time)}` : ''}</span>
-              <span>👥 {soldOut ? 'Complet' : `${selectedMeal.available_seats} place${selectedMeal.available_seats > 1 ? 's' : ''} dispo`}</span>
-              {(selectedMeal.rating || 0) > 0 && <span>⭐ {ratingLabel(selectedMeal.rating)} ({selectedMeal.reviews_count ?? 0} avis)</span>}
+        <>
+          <section className="detail-hero">
+            <img src={mealPhoto(selectedMeal, 2000)} alt={selectedMeal.title} />
+            <div className="detail-hero-txt">
+              <button className="btn btn-glass btn-sm" onClick={goBack}>← Retour</button>
+              <p className="eyebrow">{selectedMeal.cuisine} · {selectedMeal.city}</p>
+              <h1 className="display display-sm">{selectedMeal.title}</h1>
             </div>
+          </section>
 
-            {selectedMeal.description && <p style={{ color: s.mid, lineHeight: 1.6, marginBottom: '1.5rem', fontSize: '0.92rem', whiteSpace: 'pre-line' }}>{selectedMeal.description}</p>}
-
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', background: '#fff', borderRadius: 16, padding: '1.1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-              <div style={{ width: 52, height: 52, borderRadius: '50%', background: getColor(selectedMeal.profiles?.full_name), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '1.3rem', fontWeight: 700 }}>
-                {(selectedMeal.profiles?.full_name || '?').charAt(0).toUpperCase()}
+          <section className="section detail">
+            <div className="detail-main">
+              <div className="facts">
+                <div><span>Date</span><strong>{fmtDate(selectedMeal.date, true)}</strong></div>
+                {selectedMeal.time && <div><span>Heure</span><strong>{fmtTime(selectedMeal.time)}</strong></div>}
+                <div><span>Places</span><strong>{seatsLabel(selectedMeal.available_seats)}</strong></div>
+                {(selectedMeal.rating || 0) > 0 && <div><span>Note</span><strong>★ {Number(selectedMeal.rating).toFixed(1)} ({selectedMeal.reviews_count ?? 0})</strong></div>}
               </div>
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <div style={{ fontWeight: 700 }}>{selectedMeal.profiles?.full_name || 'Hôte'} <span style={{ background: '#E8F5E9', color: '#38A169', borderRadius: 999, padding: '0.15rem 0.5rem', fontSize: '0.7rem', fontWeight: 700 }}>✓ Vérifié</span></div>
-                {selectedMeal.profiles?.bio && <div style={{ fontSize: '0.8rem', color: s.mid, marginTop: '0.2rem' }}>{selectedMeal.profiles.bio}</div>}
-              </div>
-              {!isOwnMeal && (
-                <button onClick={() => openConversation({ id: selectedMeal.host_id, name: selectedMeal.profiles?.full_name || 'Hôte' })}
-                  style={{ background: 'transparent', border: `2px solid ${s.terra}`, color: s.terra, borderRadius: 10, padding: '0.5rem 1rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>💬 Message</button>
-              )}
-            </div>
 
-            {(selectedMeal.menu?.length || 0) > 0 && (
-              <>
-                <h3 style={{ fontWeight: 800, marginBottom: '0.8rem' }}>🍽️ Au menu</h3>
-                <ul style={{ listStyle: 'none', marginBottom: '1.5rem' }}>
-                  {selectedMeal.menu!.map((item, i) => (
-                    <li key={i} style={{ padding: '0.55rem 0', borderBottom: `1px solid ${s.border}`, fontSize: '0.9rem' }}>✦ {item}</li>
-                  ))}
-                </ul>
-              </>
-            )}
+              {selectedMeal.description && <p className="prose">{selectedMeal.description}</p>}
 
-            <h3 style={{ fontWeight: 800, marginBottom: '0.8rem' }}>⭐ Avis</h3>
-            {mealReviews.length === 0
-              ? <p style={{ color: s.mid, fontSize: '0.88rem', marginBottom: '1.5rem' }}>Aucun avis pour l&apos;instant.</p>
-              : mealReviews.map(r => (
-                <div key={r.id} style={{ background: '#fff', borderRadius: 12, padding: '1rem', marginBottom: '0.8rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.4rem' }}>
-                    <div style={{ width: 30, height: 30, borderRadius: '50%', background: getColor(r.profiles?.full_name), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.75rem', fontWeight: 700 }}>{(r.profiles?.full_name || '?').charAt(0).toUpperCase()}</div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>{r.profiles?.full_name || 'Utilisateur'}</div>
-                      <div style={{ color: '#F6AD55', fontSize: '0.82rem' }}>{stars(r.rating)}</div>
-                    </div>
-                    <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: s.mid }}>{new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
-                  </div>
-                  {r.comment && <p style={{ fontSize: '0.85rem', color: s.mid }}>{r.comment}</p>}
+              <div className="host-card">
+                <Avatar name={selectedMeal.profiles?.full_name} size={52} />
+                <div className="host-card-txt">
+                  <p className="muted small">Votre hôte</p>
+                  <p className="host-name">{selectedMeal.profiles?.full_name || 'Hôte'}</p>
+                  {selectedMeal.profiles?.bio && <p className="muted small">{selectedMeal.profiles.bio}</p>}
                 </div>
-              ))
-            }
+                {!isOwnMeal && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => openConversation({ id: selectedMeal.host_id, name: selectedMeal.profiles?.full_name || 'Hôte' })}>Écrire à l’hôte</button>
+                )}
+              </div>
 
-            <div style={{ background: '#fff', border: `2px solid ${s.border}`, borderRadius: 20, padding: '1.5rem', marginTop: '2rem' }}>
-              <h3 style={{ fontWeight: 800, marginBottom: '1rem' }}>Réserver votre couvert</h3>
-              {isOwnMeal ? (
-                <p style={{ color: s.mid, fontSize: '0.9rem' }}>C&apos;est votre repas. Retrouvez vos statistiques dans l&apos;espace hôte.</p>
-              ) : soldOut ? (
-                <p style={{ color: s.mid, fontSize: '0.9rem', fontWeight: 600 }}>😔 Ce repas est complet.</p>
-              ) : (
+              {(selectedMeal.menu?.length || 0) > 0 && (
                 <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.7rem' }}>
-                    <span>Nombre de convives</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
-                      <button aria-label="Moins" disabled={guests <= 1} onClick={() => setGuests(g => Math.max(1, g - 1))} style={{ width: 28, height: 28, borderRadius: '50%', border: `2px solid ${s.border}`, background: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '1rem', color: s.dark, opacity: guests <= 1 ? 0.4 : 1 }}>−</button>
-                      <span style={{ fontWeight: 700 }}>{guests}</span>
-                      <button aria-label="Plus" disabled={guests >= selectedMeal.available_seats} onClick={() => setGuests(g => Math.min(selectedMeal.available_seats, g + 1))} style={{ width: 28, height: 28, borderRadius: '50%', border: `2px solid ${s.border}`, background: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '1rem', color: s.dark, opacity: guests >= selectedMeal.available_seats ? 0.4 : 1 }}>+</button>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '0.5rem' }}><span>{eur(selectedMeal.price_per_seat)} × {guests}</span><span>{eur(subtotal)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '0.5rem' }}><span>Frais de service</span><span>{eur(SERVICE_FEE)}</span></div>
-                  {promoApplied && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#38A169', marginBottom: '0.5rem' }}><span>🎉 Promo -10%</span><span>-{eur(discount)}</span></div>}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: `2px solid ${s.border}`, paddingTop: '0.7rem' }}><span>Total</span><span>{eur(total)}</span></div>
-                  <button onClick={openPayment}
-                    style={{ width: '100%', marginTop: '1rem', background: s.terra, color: '#fff', border: 'none', borderRadius: 12, padding: '0.9rem', fontWeight: 700, cursor: 'pointer', fontSize: '1rem' }}>
-                    💳 Réserver & Payer
-                  </button>
+                  <h2 className="title">Au menu</h2>
+                  <ul className="menu">
+                    {selectedMeal.menu!.map((item, i) => <li key={i}>{item}</li>)}
+                  </ul>
                 </>
               )}
+
+              <h2 className="title">Avis</h2>
+              {mealReviews.length === 0
+                ? <p className="muted">Pas encore d’avis pour cette table.</p>
+                : mealReviews.map(r => (
+                  <div key={r.id} className="review">
+                    <Avatar name={r.profiles?.full_name} size={34} />
+                    <div>
+                      <p className="review-head"><strong>{r.profiles?.full_name || 'Invité'}</strong> <span className="stars">{stars(r.rating)}</span> <span className="muted small">{new Date(r.created_at).toLocaleDateString('fr-FR')}</span></p>
+                      {r.comment && <p className="muted">{r.comment}</p>}
+                    </div>
+                  </div>
+                ))
+              }
+              {!isHttpsUrl(selectedMeal.photo_url) && <p className="muted small photo-note">Photo d’illustration.</p>}
             </div>
-          </div>
-        </div>
+
+            <aside className="book-card">
+              <p className="book-price">{eur(selectedMeal.price_per_seat)} <small>/ couvert</small></p>
+              {isOwnMeal ? (
+                <p className="muted">C’est votre table. Suivez vos réservations depuis l’espace hôte.</p>
+              ) : soldOut ? (
+                <p className="muted">Cette table est complète.</p>
+              ) : (
+                <>
+                  <div className="stepper">
+                    <span>Convives</span>
+                    <div>
+                      <button aria-label="Moins" disabled={guests <= 1} onClick={() => setGuests(g => Math.max(1, g - 1))}>−</button>
+                      <strong>{guests}</strong>
+                      <button aria-label="Plus" disabled={guests >= selectedMeal.available_seats} onClick={() => setGuests(g => Math.min(selectedMeal.available_seats, g + 1))}>+</button>
+                    </div>
+                  </div>
+                  <div className="book-line"><span>{eur(selectedMeal.price_per_seat)} × {guests}</span><span>{eur(total)}</span></div>
+                  <div className="book-line book-total"><span>Total</span><span>{eur(total)}</span></div>
+                  <button className="btn btn-primary btn-block" onClick={openBooking}>Réserver ma place</button>
+                  <p className="muted small">Aucun paiement en ligne : le repas se règle directement auprès de l’hôte.</p>
+                </>
+              )}
+            </aside>
+          </section>
+        </>
       )}
 
       {/* ══ MESSAGES ══ */}
       {page === 'messages' && (
-        <div className="he-section" style={{ maxWidth: 900, margin: '0 auto' }}>
-          <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>💬 Messages</h2>
+        <section className="section narrow">
+          <p className="eyebrow">Messagerie</p>
+          <h1 className="title-xl">Messages</h1>
           {!user ? (
-            <div style={{ textAlign: 'center', padding: '3rem', background: '#fff', borderRadius: 16 }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔐</div>
-              <p style={{ color: s.mid, marginBottom: '1rem' }}>Connectez-vous pour accéder à vos messages</p>
-              <button onClick={() => requireAuth()} style={{ background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.4rem', fontWeight: 700, cursor: 'pointer' }}>Se connecter</button>
+            <div className="panel center">
+              <p className="muted">Connectez-vous pour accéder à vos messages.</p>
+              <button className="btn btn-primary" onClick={() => requireAuth()}>Se connecter</button>
             </div>
           ) : (
-            <div className={conversations.length > 0 ? 'he-msg-grid' : ''} style={{ display: 'grid', gap: '1rem' }}>
+            <div className={`msg-layout${conversations.length > 0 ? ' with-list' : ''}`}>
               {conversations.length > 0 && (
-                <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.07)', maxHeight: 520, overflowY: 'auto' }}>
-                  <div style={{ padding: '1rem', borderBottom: `1px solid ${s.border}`, fontWeight: 800 }}>Conversations</div>
+                <div className="panel conv-list">
                   {conversations.map(c => (
-                    <div key={c.id} onClick={() => { if (c.id !== selectedConvUser?.id) { setMessages([]); setSelectedConvUser({ id: c.id, name: c.name }) } }}
-                      style={{ display: 'flex', gap: '0.7rem', padding: '0.8rem 1rem', cursor: 'pointer', borderBottom: `1px solid ${s.border}`, background: selectedConvUser?.id === c.id ? s.cream : '#fff' }}>
-                      <div style={{ width: 36, height: 36, flexShrink: 0, borderRadius: '50%', background: getColor(c.name), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: '0.85rem' }}>{c.name.charAt(0).toUpperCase()}</div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>{c.name}</div>
-                        <div style={{ fontSize: '0.78rem', color: s.mid, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.lastMsg}</div>
-                      </div>
-                    </div>
+                    <button key={c.id} className={`conv${selectedConvUser?.id === c.id ? ' on' : ''}`}
+                      onClick={() => { if (c.id !== selectedConvUser?.id) { setMessages([]); setSelectedConvUser({ id: c.id, name: c.name }) } }}>
+                      <Avatar name={c.name} size={36} />
+                      <span className="conv-txt"><strong>{c.name}</strong><span>{c.lastMsg}</span></span>
+                    </button>
                   ))}
                 </div>
               )}
-              <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.07)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <div className="panel chat">
                 {selectedConvUser ? (
                   <>
-                    <div style={{ padding: '1rem', borderBottom: `1px solid ${s.border}`, display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
-                      <div style={{ width: 38, height: 38, borderRadius: '50%', background: getColor(selectedConvUser.name), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700 }}>{(selectedConvUser.name || '?').charAt(0).toUpperCase()}</div>
-                      <div style={{ fontWeight: 700 }}>{selectedConvUser.name}</div>
-                    </div>
-                    <div ref={bubblesRef} style={{ flex: 1, minHeight: 300, maxHeight: 400, overflowY: 'auto', padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-                      {messages.length === 0 && <p style={{ color: s.mid, fontSize: '0.85rem', textAlign: 'center', margin: 'auto' }}>Aucun message. Dites bonjour 👋</p>}
+                    <div className="chat-head"><Avatar name={selectedConvUser.name} size={36} /><strong>{selectedConvUser.name}</strong></div>
+                    <div ref={bubblesRef} className="bubbles">
+                      {messages.length === 0 && <p className="muted center">Aucun message pour l’instant.</p>}
                       {messages.map(msg => (
-                        <div key={msg.id} style={{ maxWidth: '70%', padding: '0.7rem 1rem', borderRadius: 18, fontSize: '0.88rem', lineHeight: 1.5, wordBreak: 'break-word', whiteSpace: 'pre-wrap', alignSelf: msg.sender_id === user.id ? 'flex-end' : 'flex-start', background: msg.sender_id === user.id ? s.terra : s.cream, color: msg.sender_id === user.id ? '#fff' : s.dark }}>
-                          {msg.content}
-                        </div>
+                        <div key={msg.id} className={`bubble${msg.sender_id === user.id ? ' me' : ''}`}>{msg.content}</div>
                       ))}
                     </div>
-                    <form onSubmit={e => { e.preventDefault(); sendMessage() }} style={{ padding: '1rem', borderTop: `1px solid ${s.border}`, display: 'flex', gap: '0.7rem' }}>
-                      <input value={msgInput} onChange={e => setMsgInput(e.target.value)} placeholder="Écrivez un message…" aria-label="Message" maxLength={2000}
-                        style={{ flex: 1, minWidth: 0, border: `1.5px solid ${s.border}`, borderRadius: 999, padding: '0.55rem 1rem', fontSize: '0.88rem', outline: 'none', fontFamily: 'inherit', background: '#fff', color: s.dark }} />
-                      <button type="submit" disabled={sending || !msgInput.trim()} style={{ background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.55rem 1.2rem', fontWeight: 600, cursor: 'pointer', opacity: sending || !msgInput.trim() ? 0.6 : 1 }}>Envoyer</button>
+                    <form className="chat-input" onSubmit={e => { e.preventDefault(); sendMessage() }}>
+                      <input className="input input-pill" value={msgInput} onChange={e => setMsgInput(e.target.value)} placeholder="Écrivez un message…" aria-label="Message" maxLength={2000} />
+                      <button type="submit" className="btn btn-primary" disabled={sending || !msgInput.trim()}>Envoyer</button>
                     </form>
                   </>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, color: s.mid, flexDirection: 'column', gap: '1rem', padding: '1rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '3rem' }}>💬</div>
-                    <p>Sélectionnez une conversation ou contactez un hôte depuis la page d&apos;un repas</p>
-                  </div>
+                  <p className="muted center chat-empty">Choisissez une conversation, ou écrivez à un hôte depuis la page d’une table.</p>
                 )}
               </div>
             </div>
           )}
-        </div>
+        </section>
       )}
 
-      {/* ══ DASHBOARD ══ */}
+      {/* ══ TABLEAU DE BORD ══ */}
       {page === 'dashboard' && (
-        <div className="he-section" style={{ maxWidth: 1060, margin: '0 auto' }}>
+        <section className="section">
           {!user ? (
-            <div style={{ textAlign: 'center', padding: '3rem', background: '#fff', borderRadius: 16 }}>
-              <p style={{ color: s.mid, marginBottom: '1rem' }}>Connectez-vous pour accéder à votre tableau de bord</p>
-              <button onClick={() => requireAuth()} style={{ background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.4rem', fontWeight: 700, cursor: 'pointer' }}>Se connecter</button>
+            <div className="panel center">
+              <p className="muted">Connectez-vous pour accéder à votre espace.</p>
+              <button className="btn btn-primary" onClick={() => requireAuth()}>Se connecter</button>
             </div>
           ) : (
-            <div className="he-dash">
-              <div style={{ background: '#fff', borderRadius: 16, padding: '1.2rem', height: 'fit-content', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
-                <div style={{ textAlign: 'center', paddingBottom: '1rem', borderBottom: `1px solid ${s.border}`, marginBottom: '0.8rem' }}>
-                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: s.terra, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '1.4rem', fontWeight: 700, margin: '0 auto 0.5rem' }}>
-                    {(profile?.full_name || user.email || '?').charAt(0).toUpperCase()}
-                  </div>
-                  <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{profile?.full_name || user.email}</div>
-                  <div style={{ fontSize: '0.75rem', color: s.mid }}>Membre Shareat</div>
+            <div className="dash">
+              <aside className="panel dash-side">
+                <div className="dash-id">
+                  <Avatar name={profile?.full_name || user.email} size={56} />
+                  <strong>{profile?.full_name || user.email}</strong>
                 </div>
-                {([['overview', '📊', 'Vue d\'ensemble'], ['bookings', '🍽️', 'Réservations'], ['favorites', '❤️', 'Favoris'], ['profile', '👤', 'Mon profil'], ['host', '🏠', 'Espace hôte']] as [DashTab, string, string][]).map(([id, icon, label]) => (
-                  <div key={id} onClick={() => setDashTab(id)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.7rem 0.9rem', borderRadius: 12, cursor: 'pointer', fontSize: '0.88rem', fontWeight: dashTab === id ? 700 : 500, background: dashTab === id ? s.cream : 'transparent', color: dashTab === id ? s.terra : s.dark, marginBottom: '0.3rem' }}>
-                    <span>{icon}</span>{label}
-                  </div>
+                {dashTabs.map(([id, label]) => (
+                  <button key={id} className={`dash-tab${dashTab === id ? ' on' : ''}`} onClick={() => setDashTab(id)}>{label}</button>
                 ))}
-                <div onClick={doLogout} style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.7rem 0.9rem', borderRadius: 12, cursor: 'pointer', fontSize: '0.88rem', color: '#E53E3E', marginTop: '1rem' }}>🚪 Déconnexion</div>
-              </div>
+                <button className="dash-tab danger" onClick={doLogout}>Déconnexion</button>
+              </aside>
 
-              <div style={{ background: '#fff', borderRadius: 16, padding: '1.5rem', boxShadow: '0 2px 12px rgba(0,0,0,0.07)', minWidth: 0 }}>
+              <div className="panel dash-body">
                 {dashTab === 'overview' && (
-                  <div>
-                    <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>Bonjour {profile?.full_name?.split(' ')[0] || ''} 👋</h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-                      {[[bookings.length.toString(), 'Réservations'], [favMeals.length.toString(), 'Favoris'], [meals.length.toString(), 'Repas dispo']].map(([v, l]) => (
-                        <div key={l} style={{ background: s.cream, borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
-                          <strong style={{ display: 'block', fontSize: '1.5rem', color: s.terra }}>{v}</strong>
-                          <span style={{ fontSize: '0.78rem', color: s.mid }}>{l}</span>
-                        </div>
+                  <>
+                    <h2 className="title">Bonjour {profile?.full_name?.split(' ')[0] || ''}</h2>
+                    <div className="stats">
+                      {[[bookings.length, 'Réservations'], [favMeals.length, 'Favoris'], [meals.length, 'Tables à venir']].map(([v, l]) => (
+                        <div key={l} className="stat"><strong>{v}</strong><span>{l}</span></div>
                       ))}
                     </div>
-                    <h3 style={{ fontWeight: 700, marginBottom: '1rem' }}>Repas disponibles</h3>
-                    <Grid data={meals.slice(0, 3)} loading={mealsLoading} {...gridProps} />
-                  </div>
+                    <h3 className="subtitle">Prochaines tables</h3>
+                    <Grid data={meals.slice(0, 3)} loading={mealsLoading} empty={emptyState} {...gridProps} />
+                  </>
                 )}
 
                 {dashTab === 'bookings' && (
-                  <div>
-                    <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>🍽️ Mes réservations</h2>
+                  <>
+                    <h2 className="title">Mes réservations</h2>
                     {bookings.length === 0
-                      ? <div style={{ textAlign: 'center', padding: '2rem', color: s.mid }}><div style={{ fontSize: '2.5rem', marginBottom: '0.8rem' }}>🍽️</div><p>Aucune réservation pour l&apos;instant</p><button onClick={() => nav('explore')} style={{ marginTop: '1rem', background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.2rem', fontWeight: 700, cursor: 'pointer' }}>Explorer les repas</button></div>
+                      ? <div className="empty"><p>Aucune réservation pour l’instant.</p><button className="btn btn-primary" onClick={() => nav('explore')}>Explorer les tables</button></div>
                       : bookings.map(b => (
-                        <div key={b.id} onClick={() => { if (b.meals) openMeal(b.meals) }} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.9rem', border: `1.5px solid ${s.border}`, borderRadius: 12, marginBottom: '0.8rem', flexWrap: 'wrap', cursor: b.meals ? 'pointer' : 'default' }}>
-                          <span style={{ fontSize: '2rem' }}>{b.meals?.photo_url || '🍽️'}</span>
-                          <div style={{ flex: 1, minWidth: 150 }}>
-                            <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>{b.meals?.title || 'Repas supprimé'}</div>
-                            <div style={{ fontSize: '0.78rem', color: s.mid }}>{b.meals ? `📍 ${b.meals.city} · 📅 ${fmtDate(b.meals.date)} · ` : ''}{b.seats} couvert(s) · {eur(b.total_amount)}</div>
+                        <div key={b.id} className="booking" onClick={() => { if (b.meals) openMeal(b.meals) }}>
+                          {b.meals && <img src={mealPhoto(b.meals, 300)} alt="" />}
+                          <div className="booking-txt">
+                            <strong>{b.meals?.title || 'Table supprimée'}</strong>
+                            <span className="muted small">{b.meals ? `${b.meals.city} · ${fmtDate(b.meals.date)} · ` : ''}{b.seats} couvert{b.seats > 1 ? 's' : ''} · {eur(b.total_amount)} à régler sur place</span>
                           </div>
-                          <span style={{ background: b.status === 'confirmed' ? '#E8F5E9' : b.status === 'pending' ? '#EBF8FF' : b.status === 'cancelled' ? '#FDECEC' : '#f0f0f0', color: b.status === 'confirmed' ? '#38A169' : b.status === 'pending' ? '#3182CE' : b.status === 'cancelled' ? '#E53E3E' : s.mid, borderRadius: 999, padding: '0.2rem 0.7rem', fontSize: '0.75rem', fontWeight: 700 }}>
-                            {b.status === 'confirmed' ? 'Confirmé' : b.status === 'pending' ? 'En attente' : b.status === 'cancelled' ? 'Annulé' : 'Terminé'}
+                          <span className={`status status-${b.status}`}>
+                            {b.status === 'confirmed' ? 'Confirmée' : b.status === 'pending' ? 'En attente' : b.status === 'cancelled' ? 'Annulée' : 'Terminée'}
                           </span>
                         </div>
                       ))
                     }
-                  </div>
+                  </>
                 )}
 
                 {dashTab === 'favorites' && (
-                  <div>
-                    <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>❤️ Mes favoris</h2>
-                    {favMeals.length === 0
-                      ? <div style={{ textAlign: 'center', padding: '2rem', color: s.mid }}><div style={{ fontSize: '2.5rem', marginBottom: '0.8rem' }}>❤️</div><p>Aucun favori pour l&apos;instant</p></div>
-                      : <Grid data={favMeals} {...gridProps} />
-                    }
-                  </div>
+                  <>
+                    <h2 className="title">Mes favoris</h2>
+                    <Grid data={favMeals} empty={<p>Aucun favori pour l’instant.</p>} {...gridProps} />
+                  </>
                 )}
 
                 {dashTab === 'profile' && (
                   <form onSubmit={e => { e.preventDefault(); saveProfile() }}>
-                    <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>👤 Mon profil</h2>
-                    <div className="he-2col">
-                      <Inp placeholder="Prénom" value={profileFname} onChange={setProfileFname} autoComplete="given-name" />
-                      <Inp placeholder="Nom" value={profileLname} onChange={setProfileLname} autoComplete="family-name" />
+                    <h2 className="title">Mon profil</h2>
+                    <div className="two-col">
+                      <Inp label="Prénom" placeholder="Prénom" value={profileFname} onChange={setProfileFname} autoComplete="given-name" />
+                      <Inp label="Nom" placeholder="Nom" value={profileLname} onChange={setProfileLname} autoComplete="family-name" />
                     </div>
-                    <Inp placeholder="Email" value={user.email || ''} type="email" readOnly />
-                    <Inp placeholder="Ville" value={profileCity} onChange={setProfileCity} />
-                    <textarea value={profileBio} onChange={e => setProfileBio(e.target.value)} placeholder="Parlez de vous, vos passions culinaires…" rows={3} aria-label="Bio"
-                      style={{ ...inpStyle, fontSize: '0.88rem', resize: 'vertical', marginBottom: '1rem' }} />
-                    <button type="submit" disabled={loading} style={{ background: loading ? '#ccc' : s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.4rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer' }}>💾 Enregistrer</button>
+                    <Inp label="Email" placeholder="Email" value={user.email || ''} type="email" readOnly />
+                    <Inp label="Ville" placeholder="Ville" value={profileCity} onChange={setProfileCity} />
+                    <label className="field">
+                      <span className="field-label">À propos de vous</span>
+                      <textarea className="input" value={profileBio} onChange={e => setProfileBio(e.target.value)} placeholder="Vos passions culinaires, d’où vous venez…" rows={3} aria-label="Bio" />
+                    </label>
+                    <button type="submit" className="btn btn-primary" disabled={loading}>Enregistrer</button>
                   </form>
                 )}
 
                 {dashTab === 'host' && (
                   <form onSubmit={e => { e.preventDefault(); publishMeal() }}>
-                    <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>🏠 Espace hôte</h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-                      {[[hostStats.meals.toString(), 'Repas proposés'], [eur(hostStats.revenue), 'Revenus totaux'], [hostStats.rating > 0 ? hostStats.rating.toFixed(1) + '⭐' : '—', 'Note hôte']].map(([v, l]) => (
-                        <div key={l} style={{ background: s.cream, borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
-                          <strong style={{ display: 'block', fontSize: '1.5rem', color: s.terra }}>{v}</strong>
-                          <span style={{ fontSize: '0.78rem', color: s.mid }}>{l}</span>
-                        </div>
+                    <h2 className="title">Espace hôte</h2>
+                    <div className="stats">
+                      {[[hostStats.meals, 'Tables publiées'], [hostStats.guests, 'Invités confirmés'], [eur(hostStats.revenue), 'Montant réservé'], [hostStats.rating > 0 ? `★ ${hostStats.rating.toFixed(1)}` : '—', 'Note hôte']].map(([v, l]) => (
+                        <div key={l} className="stat"><strong>{v}</strong><span>{l}</span></div>
                       ))}
                     </div>
-                    <h3 style={{ fontWeight: 700, marginBottom: '1rem' }}>Proposer un nouveau repas</h3>
-                    <Inp placeholder="Titre du repas *" value={hostTitle} onChange={setHostTitle} maxLength={120} />
-                    <div className="he-2col">
-                      <select value={hostCuisine} onChange={e => setHostCuisine(e.target.value)} aria-label="Cuisine" style={inpStyle}>
-                        {Object.keys(cuisineEmojis).map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <Inp placeholder="Prix / couvert (€) *" value={hostPrice} onChange={setHostPrice} type="number" min="1" inputMode="decimal" />
+                    <h3 className="subtitle">Proposer une table</h3>
+                    <Inp label="Titre *" placeholder="Couscous du dimanche" value={hostTitle} onChange={setHostTitle} maxLength={120} />
+                    <div className="two-col">
+                      <label className="field">
+                        <span className="field-label">Cuisine</span>
+                        <select className="input" value={hostCuisine} onChange={e => setHostCuisine(e.target.value)} aria-label="Cuisine">
+                          {CUISINES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </label>
+                      <Inp label="Prix par couvert (€) *" placeholder="20" value={hostPrice} onChange={setHostPrice} type="number" min="1" inputMode="decimal" />
                     </div>
-                    <Inp placeholder="Ville *" value={hostCity} onChange={setHostCity} />
-                    <div className="he-2col">
-                      <Inp placeholder="Date *" value={hostDate} onChange={setHostDate} type="date" min={todayISO()} />
-                      <Inp placeholder="Heure" value={hostTime} onChange={setHostTime} type="time" />
+                    <Inp label="Ville *" placeholder="Lyon" value={hostCity} onChange={setHostCity} />
+                    <div className="two-col">
+                      <Inp label="Date *" placeholder="Date" value={hostDate} onChange={setHostDate} type="date" min={todayISO()} />
+                      <Inp label="Heure" placeholder="Heure" value={hostTime} onChange={setHostTime} type="time" />
                     </div>
-                    <Inp placeholder="Nombre de couverts *" value={hostSeats} onChange={setHostSeats} type="number" min="1" inputMode="numeric" />
-                    <textarea value={hostDesc} onChange={e => setHostDesc(e.target.value)} placeholder="Description du repas, ambiance…" rows={3} aria-label="Description"
-                      style={{ ...inpStyle, fontSize: '0.88rem', resize: 'vertical' }} />
-                    <textarea value={hostMenu} onChange={e => setHostMenu(e.target.value)} placeholder={'Menu (1 plat par ligne) :\nEntrée : Salade composée\nPlat : Poulet rôti\nDessert : Tarte maison'} rows={4} aria-label="Menu"
-                      style={{ ...inpStyle, fontSize: '0.88rem', resize: 'vertical' }} />
-                    <button type="submit" disabled={loading}
-                      style={{ width: '100%', background: loading ? '#ccc' : s.sage, color: '#fff', border: 'none', borderRadius: 12, padding: '0.85rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '0.95rem' }}>
-                      {loading ? 'Publication…' : '🎉 Publier mon repas'}
-                    </button>
+                    <Inp label="Nombre de couverts *" placeholder="6" value={hostSeats} onChange={setHostSeats} type="number" min="1" inputMode="numeric" />
+                    <Inp label="Photo de votre plat (lien https, facultatif)" placeholder="https://…" value={hostPhoto} onChange={setHostPhoto} type="url" inputMode="url" />
+                    <label className="field">
+                      <span className="field-label">Description</span>
+                      <textarea className="input" value={hostDesc} onChange={e => setHostDesc(e.target.value)} placeholder="L’ambiance, l’histoire du plat…" rows={3} aria-label="Description" />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Menu (un plat par ligne)</span>
+                      <textarea className="input" value={hostMenu} onChange={e => setHostMenu(e.target.value)} placeholder={'Entrée : salade de saison\nPlat : couscous\nDessert : cornes de gazelle'} rows={4} aria-label="Menu" />
+                    </label>
+                    <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Publication…' : 'Publier ma table'}</button>
                   </form>
                 )}
               </div>
             </div>
           )}
-        </div>
+        </section>
       )}
 
-      {/* ══ MAP ══ */}
-      {page === 'map' && (
-        <div className="he-section" style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>🗺️ Carte des repas</h2>
-          <div style={{ borderRadius: 16, overflow: 'hidden', height: 380, background: 'linear-gradient(180deg, #CFE3F2 0%, #E4EEF3 55%, #F3E6CC 100%)', position: 'relative', marginBottom: '1.5rem' }}>
-            <div style={{ position: 'absolute', inset: 0, opacity: 0.4, backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 39px, #B9D3E8 39px, #B9D3E8 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, #B9D3E8 39px, #B9D3E8 40px)' }} />
-            {!mealsLoading && filtered.length === 0 && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ fontSize: '3rem' }}>🗺️</div>
-                <p style={{ color: s.mid, fontWeight: 600 }}>Aucun repas à afficher sur la carte</p>
-              </div>
-            )}
-            {filtered.map((m, i) => (
-              <div key={m.id} onClick={() => openMeal(m)} title={`${m.title} — ${m.city}`}
-                style={{ position: 'absolute', left: `${12 + (i * 17) % 76}%`, top: `${20 + (i * 23) % 65}%`, transform: 'translate(-50%, -100%)', cursor: 'pointer', zIndex: 10 }}>
-                <div style={{ background: s.terra, color: '#fff', borderRadius: 999, padding: '0.2rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap', boxShadow: '0 3px 12px rgba(30,90,168,0.4)' }}>
-                  {m.photo_url || '🍽️'} {eur(m.price_per_seat)}
-                </div>
-                <div style={{ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: `8px solid ${s.terra}`, margin: '0 auto' }} />
-              </div>
-            ))}
-          </div>
-          <h3 style={{ fontWeight: 700, marginBottom: '1rem' }}>Repas à proximité</h3>
-          <Grid data={filtered.slice(0, 4)} loading={mealsLoading} {...filteredEmpty} {...gridProps} />
-        </div>
-      )}
-
-      {/* ══ BECOME ══ */}
+      {/* ══ DEVENIR HÔTE ══ */}
       {page === 'become' && (
-        <div>
-          <div style={{ background: 'linear-gradient(135deg, #8A9A3B, #55621F)', color: '#fff', padding: '4rem 1.25rem', textAlign: 'center' }}>
-            <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '1rem' }}>🏠 Partagez votre table</h1>
-            <p style={{ opacity: 0.9, maxWidth: 480, margin: '0 auto 2rem', fontSize: '1rem' }}>Rencontrez des gens du monde entier et gagnez un revenu complémentaire.</p>
-          </div>
-          <div className="he-section" style={{ maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-              {[['💶', '#E8F0FA', 'Revenus complémentaires', 'Gagnez selon vos disponibilités.'], ['🌍', '#E8F5E9', 'Rencontres mondiales', 'Accueillez des voyageurs curieux.'], ['🛡️', '#EBF8FF', 'Sécurité garantie', 'Profils vérifiés, paiements sécurisés.']].map(([icon, bg, title, desc]) => (
-                <div key={title} style={{ textAlign: 'center' }}>
-                  <div style={{ width: 60, height: 60, borderRadius: '50%', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', margin: '0 auto 1rem' }}>{icon}</div>
-                  <h3 style={{ fontWeight: 700, marginBottom: '0.4rem' }}>{title}</h3>
-                  <p style={{ fontSize: '0.85rem', color: s.mid }}>{desc}</p>
+        <>
+          <section className="hero hero-sm">
+            <img className="hero-bg" src={unsplash(HOST_PHOTO, 2000)} alt="" />
+            <div className="hero-inner">
+              <p className="eyebrow">Devenir hôte</p>
+              <h1 className="display">Partagez votre <span className="accent">table</span></h1>
+              <p className="lead">Recevez chez vous des personnes curieuses de votre cuisine et de votre histoire.</p>
+            </div>
+          </section>
+          <section className="section">
+            <div className="steps">
+              {[['01', 'Vous fixez le prix', 'Indiquez le prix par couvert. Vos invités le règlent directement auprès de vous.'],
+                ['02', 'Vous choisissez la date', 'Une date, une heure, un nombre de couverts : vous gardez la main.'],
+                ['03', 'Vous échangez avant', 'Vos invités peuvent vous écrire pour poser leurs questions avant de réserver.']].map(([n, t, d]) => (
+                <div key={n} className="step">
+                  <span className="step-num">{n}</span>
+                  <h3>{t}</h3>
+                  <p>{d}</p>
                 </div>
               ))}
             </div>
-            <button onClick={() => { if (user) { setDashTab('host'); nav('dashboard') } else { setAuthMode('signup'); setShowAuth(true) } }}
-              style={{ background: s.sage, color: '#fff', border: 'none', borderRadius: 999, padding: '0.85rem 2.2rem', fontWeight: 700, cursor: 'pointer', fontSize: '1rem' }}>
-              {user ? 'Proposer un repas →' : 'Créer mon profil hôte →'}
-            </button>
-          </div>
-        </div>
+            <div className="center">
+              <button className="btn btn-primary" onClick={() => { if (user) { setDashTab('host'); nav('dashboard') } else { setAuthMode('signup'); setShowAuth(true) } }}>
+                {user ? 'Proposer une table' : 'Créer mon compte hôte'}
+              </button>
+            </div>
+          </section>
+        </>
       )}
 
       </main>
 
-      {/* ══ MODAL AUTH ══ */}
+      {/* ══ CONNEXION ══ */}
       {showAuth && !user && (
-        <div onClick={e => { if (e.target === e.currentTarget) setShowAuth(false) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div role="dialog" aria-modal="true" style={{ background: '#fff', borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
-            <button onClick={() => setShowAuth(false)} aria-label="Fermer" style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: s.mid }}>✕</button>
-            <div style={{ textAlign: 'center', fontSize: '2.5rem', marginBottom: '0.5rem' }}>🍴</div>
-            <h2 style={{ textAlign: 'center', fontWeight: 800, marginBottom: '0.3rem' }}>Bienvenue sur Shareat</h2>
-            <p style={{ textAlign: 'center', color: s.mid, fontSize: '0.85rem', marginBottom: '1.3rem' }}>La table qui unit les cultures</p>
-            <div style={{ display: 'flex', border: `1.5px solid ${s.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: '1.5rem' }}>
+        <div className="backdrop" onClick={e => { if (e.target === e.currentTarget) setShowAuth(false) }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Connexion">
+            <button className="modal-close" onClick={() => setShowAuth(false)} aria-label="Fermer">×</button>
+            <p className="logo logo-static">Shareat</p>
+            <div className="seg">
               {(['login', 'signup'] as const).map(t => (
-                <div key={t} onClick={() => setAuthMode(t)}
-                  style={{ flex: 1, padding: '0.55rem', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '0.88rem', background: authMode === t ? s.terra : 'transparent', color: authMode === t ? '#fff' : s.dark }}>
-                  {t === 'login' ? 'Connexion' : 'Inscription'}
-                </div>
+                <button key={t} className={authMode === t ? 'on' : ''} onClick={() => setAuthMode(t)}>{t === 'login' ? 'Connexion' : 'Inscription'}</button>
               ))}
             </div>
             {authMode === 'login' ? (
               <form onSubmit={e => { e.preventDefault(); doLogin() }}>
                 <Inp placeholder="Email" value={email} onChange={setEmail} type="email" autoComplete="email" />
                 <Inp placeholder="Mot de passe" value={password} onChange={setPassword} type="password" autoComplete="current-password" />
-                <button type="submit" disabled={loading}
-                  style={{ width: '100%', background: loading ? '#ccc' : s.terra, color: '#fff', border: 'none', borderRadius: 10, padding: '0.85rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '0.95rem' }}>
-                  {loading ? 'Connexion…' : 'Se connecter'}
-                </button>
+                <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Connexion…' : 'Se connecter'}</button>
               </form>
             ) : (
               <form onSubmit={e => { e.preventDefault(); doSignup() }}>
                 <Inp placeholder="Prénom et nom" value={fullName} onChange={setFullName} autoComplete="name" />
                 <Inp placeholder="Email" value={email} onChange={setEmail} type="email" autoComplete="email" />
-                <Inp placeholder="Mot de passe (8 car. min)" value={password} onChange={setPassword} type="password" autoComplete="new-password" />
-                <p style={{ fontSize: '0.75rem', color: s.mid, marginBottom: '1rem' }}>En créant un compte, vous acceptez les CGU.</p>
-                <button type="submit" disabled={loading}
-                  style={{ width: '100%', background: loading ? '#ccc' : s.terra, color: '#fff', border: 'none', borderRadius: 10, padding: '0.85rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '0.95rem' }}>
-                  {loading ? 'Création…' : 'Créer mon compte'}
-                </button>
+                <Inp placeholder="Mot de passe (8 caractères minimum)" value={password} onChange={setPassword} type="password" autoComplete="new-password" />
+                <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Création…' : 'Créer mon compte'}</button>
               </form>
             )}
           </div>
         </div>
       )}
 
-      {/* ══ MODAL PAYMENT ══ */}
-      {showPayment && selectedMeal && (
-        <div onClick={e => { if (e.target === e.currentTarget && !loading) setShowPayment(false) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div role="dialog" aria-modal="true" style={{ background: '#fff', borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
-            <button onClick={() => { if (!loading) setShowPayment(false) }} aria-label="Fermer" style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: s.mid }}>✕</button>
-            {payDone ? (
-              <div style={{ textAlign: 'center', padding: '1rem' }}>
-                <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎉</div>
-                <h2 style={{ fontWeight: 900, marginBottom: '0.5rem' }}>Réservation confirmée !</h2>
-                <p style={{ color: s.mid, marginBottom: '1.5rem' }}>Votre repas chez <strong>{selectedMeal.profiles?.full_name || 'votre hôte'}</strong> est confirmé pour <strong>{bookedSeats} couvert(s)</strong>.</p>
-                <div style={{ background: '#E8F5E9', color: '#38A169', borderRadius: 999, padding: '0.5rem 1.2rem', display: 'inline-block', fontWeight: 700, marginBottom: '1.5rem' }}>✅ Paiement accepté</div>
-                <div style={{ display: 'flex', gap: '0.8rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <button onClick={() => { setShowPayment(false); setDashTab('bookings'); nav('dashboard') }} style={{ background: s.terra, color: '#fff', border: 'none', borderRadius: 999, padding: '0.6rem 1.2rem', fontWeight: 700, cursor: 'pointer' }}>Mes réservations</button>
-                  <button onClick={() => { setShowPayment(false); openConversation({ id: selectedMeal.host_id, name: selectedMeal.profiles?.full_name || 'Hôte' }) }}
-                    style={{ background: 'transparent', border: `2px solid ${s.terra}`, color: s.terra, borderRadius: 999, padding: '0.6rem 1.2rem', fontWeight: 700, cursor: 'pointer' }}>💬 Contacter l&apos;hôte</button>
+      {/* ══ RÉSERVATION ══ */}
+      {showBooking && selectedMeal && (
+        <div className="backdrop" onClick={e => { if (e.target === e.currentTarget && !loading) setShowBooking(false) }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Réservation">
+            <button className="modal-close" onClick={() => { if (!loading) setShowBooking(false) }} aria-label="Fermer">×</button>
+            {bookingDone ? (
+              <div className="center">
+                <p className="eyebrow">C’est réservé</p>
+                <h2 className="title">À table !</h2>
+                <p className="muted">Votre place chez <strong>{selectedMeal.profiles?.full_name || 'votre hôte'}</strong> est réservée pour <strong>{bookedSeats} couvert{bookedSeats > 1 ? 's' : ''}</strong>, {fmtDate(selectedMeal.date, true)}.</p>
+                <p className="muted small">Le repas se règle directement auprès de l’hôte.</p>
+                <div className="row-btns">
+                  <button className="btn btn-primary" onClick={() => { setShowBooking(false); setDashTab('bookings'); nav('dashboard') }}>Mes réservations</button>
+                  <button className="btn btn-ghost" onClick={() => { setShowBooking(false); openConversation({ id: selectedMeal.host_id, name: selectedMeal.profiles?.full_name || 'Hôte' }) }}>Écrire à l’hôte</button>
                 </div>
               </div>
             ) : (
               <form onSubmit={e => { e.preventDefault(); createBooking() }}>
-                <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>💳 Paiement sécurisé</h2>
-                <div style={{ display: 'flex', gap: '0.7rem', background: s.cream, borderRadius: 12, padding: '0.9rem', marginBottom: '1.5rem', alignItems: 'center' }}>
-                  <span style={{ fontSize: '2rem' }}>{selectedMeal.photo_url || '🍽️'}</span>
+                <h2 className="title">Confirmer la réservation</h2>
+                <div className="recap">
+                  <img src={mealPhoto(selectedMeal, 300)} alt="" />
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>{selectedMeal.title}</div>
-                    <div style={{ fontSize: '0.78rem', color: s.mid }}>Chez {selectedMeal.profiles?.full_name || 'Hôte'} · {guests} couvert(s) · {fmtDate(selectedMeal.date)}</div>
+                    <strong>{selectedMeal.title}</strong>
+                    <span className="muted small">Chez {selectedMeal.profiles?.full_name || 'votre hôte'} · {selectedMeal.city}</span>
+                    <span className="muted small">{fmtDate(selectedMeal.date, true)}{selectedMeal.time ? ` à ${fmtTime(selectedMeal.time)}` : ''}</span>
                   </div>
                 </div>
-                <Inp placeholder="Numéro de carte" value={cardNum} onChange={v => setCardNum(formatCardNum(v))} inputMode="numeric" autoComplete="cc-number" />
-                <div className="he-2col" style={{ gap: '0.8rem' }}>
-                  <Inp placeholder="MM / AA" value={cardExp} onChange={v => setCardExp(formatCardExp(v))} inputMode="numeric" autoComplete="cc-exp" />
-                  <Inp placeholder="CVV" value={cardCvv} onChange={v => setCardCvv(v.replace(/\D/g, '').substring(0, 4))} type="password" inputMode="numeric" autoComplete="cc-csc" />
-                </div>
-                <Inp placeholder="Nom sur la carte" value={cardName} onChange={setCardName} autoComplete="cc-name" />
-                <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '1rem' }}>
-                  <input value={promo} onChange={e => setPromo(e.target.value)} placeholder={`Code promo (ex: ${PROMO_CODE})`} aria-label="Code promo"
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyPromo() } }}
-                    style={{ flex: 1, minWidth: 0, border: `1.5px solid ${s.border}`, borderRadius: 10, padding: '0.6rem 0.9rem', fontSize: '0.88rem', outline: 'none', fontFamily: 'inherit', background: '#fff', color: s.dark }} />
-                  <button type="button" onClick={applyPromo}
-                    style={{ background: 'transparent', border: `2px solid ${s.terra}`, color: s.terra, borderRadius: 10, padding: '0.5rem 0.9rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>Appliquer</button>
-                </div>
-                <div style={{ fontSize: '0.75rem', color: s.mid, display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem' }}>🔒 Paiement SSL 256 bits sécurisé</div>
-                <div style={{ borderTop: `1px solid ${s.border}`, paddingTop: '0.8rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', marginBottom: '0.4rem' }}><span>{eur(selectedMeal.price_per_seat)} × {guests}</span><span>{eur(subtotal)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', marginBottom: '0.4rem' }}><span>Frais de service</span><span>{eur(SERVICE_FEE)}</span></div>
-                  {promoApplied && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#38A169', marginBottom: '0.4rem' }}><span>🎉 Promo -10%</span><span>-{eur(discount)}</span></div>}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: `2px solid ${s.border}`, paddingTop: '0.6rem', marginTop: '0.4rem' }}><span>Total</span><span>{eur(total)}</span></div>
-                </div>
-                <button type="submit" disabled={loading}
-                  style={{ width: '100%', background: loading ? '#ccc' : s.terra, color: '#fff', border: 'none', borderRadius: 12, padding: '0.9rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '1rem' }}>
-                  {loading ? 'Traitement…' : `Confirmer et payer — ${eur(total)}`}
-                </button>
+                <div className="book-line"><span>{eur(selectedMeal.price_per_seat)} × {guests} couvert{guests > 1 ? 's' : ''}</span><span>{eur(total)}</span></div>
+                <div className="book-line book-total"><span>À régler à l’hôte</span><span>{eur(total)}</span></div>
+                <p className="muted small">Aucun paiement n’est demandé en ligne.</p>
+                <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Réservation…' : 'Confirmer'}</button>
               </form>
             )}
           </div>
         </div>
       )}
 
-      {/* ── TOAST ── */}
-      {toastMsg && (
-        <div role="status" style={{ position: 'fixed', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', background: s.dark, color: '#fff', padding: '0.7rem 1.5rem', borderRadius: 999, fontWeight: 600, fontSize: '0.88rem', zIndex: 500, maxWidth: 'calc(100vw - 2rem)', textAlign: 'center', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
-          {toastMsg}
-        </div>
-      )}
+      {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
 
-      <footer style={{ background: s.dark, color: 'rgba(255,255,255,0.6)', textAlign: 'center', padding: '2rem', fontSize: '0.82rem', marginTop: '3rem' }}>
-        <strong style={{ color: '#fff' }}>Shareat</strong> — Partagez une table, découvrez le monde 🌍<br />
-        <span style={{ fontSize: '0.75rem' }}>© 2026 Shareat · CGU · Confidentialité · Aide</span>
+      <footer className="footer">
+        <span className="logo logo-static">Shareat</span>
+        <span>Partagez une table, découvrez une culture.</span>
+        <span className="muted small">© 2026 Shareat · Photos : Unsplash</span>
       </footer>
     </div>
   )
