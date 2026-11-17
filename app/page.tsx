@@ -2,8 +2,12 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
+import Link from 'next/link'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, supabaseConfigured } from '../lib/supabase'
+import { CATEGORIES, CUISINES, COMMISSION_RATE, FREE_CANCELLATION_HOURS, displayPrice, parisDateTime, todayParis } from '../lib/shared'
+import { geocodeAddress, approx, type GeoResult } from '../lib/geocode'
+import MealMap, { type MapPoint } from './components/MealMap'
 
 // ═════════════════════════════ TYPES ═════════════════════════════
 
@@ -14,10 +18,7 @@ type HostInfo = {
   bio?: string | null
 }
 
-type Profile = HostInfo & {
-  id: string
-  city?: string | null
-}
+type Profile = HostInfo & { id: string; city?: string | null }
 
 type Meal = {
   id: string
@@ -25,6 +26,7 @@ type Meal = {
   cuisine: string
   price_per_seat: number
   available_seats: number
+  max_seats?: number
   date: string
   time: string
   city: string
@@ -35,16 +37,13 @@ type Meal = {
   reviews_count: number | null
   description: string | null
   host_id: string
+  is_active?: boolean
+  lat: number | null
+  lng: number | null
   profiles: HostInfo | null
 }
 
-type Message = {
-  id: string
-  content: string
-  sender_id: string
-  receiver_id: string
-  created_at: string
-}
+type Message = { id: string; content: string; sender_id: string; receiver_id: string; created_at: string }
 
 type Booking = {
   id: string
@@ -53,22 +52,21 @@ type Booking = {
   total_amount: number
   status: string
   created_at: string
+  refunded_amount: number | null
   meals: Meal | null
 }
 
-type Review = {
-  id: string
-  rating: number
-  comment: string | null
-  created_at: string
-  profiles: { full_name: string | null } | null
-}
+type HostBooking = { id: string; meal_id: string; seats: number; status: string; host_amount: number | null; profiles: { full_name: string | null } | null }
+
+type Review = { id: string; rating: number; comment: string | null; created_at: string; profiles: { full_name: string | null } | null }
 
 type ConvUser = { id: string; name: string }
 type Conversation = ConvUser & { lastMsg: string }
+type Payouts = { configured: boolean; active: boolean }
 
-type Page = 'home' | 'explore' | 'detail' | 'messages' | 'dashboard' | 'become'
+type Page = 'home' | 'explore' | 'map' | 'detail' | 'messages' | 'dashboard' | 'become'
 type DashTab = 'overview' | 'bookings' | 'favorites' | 'profile' | 'host'
+type Confirm = { kind: 'booking'; id: string; title: string; refundable: boolean } | { kind: 'meal'; id: string; title: string; guests: number }
 
 // ═════════════════════════════ HELPERS ═════════════════════════════
 
@@ -90,7 +88,6 @@ const cuisinePhotos: Record<string, string> = {
   Espagnole: '1534080564583-6be75777b70a',
   Autre: '1414235077428-338989a2e8c0',
 }
-const CUISINES = Object.keys(cuisinePhotos)
 
 const isHttpsUrl = (v?: string | null) => Boolean(v && /^https:\/\/\S+$/i.test(v.trim()))
 const mealPhoto = (m: Pick<Meal, 'photo_url' | 'cuisine'>, w = 900) =>
@@ -100,18 +97,10 @@ const avatarTones = ['#A7C7E7', '#8FB3DA', '#C3D7EE', '#7FA3CC', '#B5C9E6', '#9B
 const tone = (name?: string | null) => avatarTones[(name?.charCodeAt(0) || 0) % avatarTones.length]
 const initial = (name?: string | null) => (name || '?').trim().charAt(0).toUpperCase() || '?'
 
-/** Arrondi au centime. */
 const money = (n: number) => Math.round((Number(n) || 0) * 100) / 100
-/** Affichage d'un montant : 12 → "12 €", 12.5 → "12,50 €". */
 const eur = (n: number) => {
   const v = money(n)
   return (Number.isInteger(v) ? v.toString() : v.toFixed(2).replace('.', ',')) + ' €'
-}
-
-/** Date du jour au format AAAA-MM-JJ (heure locale). */
-const todayISO = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const fmtDate = (iso?: string | null, long = false) => {
@@ -122,77 +111,95 @@ const fmtDate = (iso?: string | null, long = false) => {
     ? { weekday: 'long', day: 'numeric', month: 'long' }
     : { weekday: 'short', day: 'numeric', month: 'short' })
 }
-
 const fmtTime = (t?: string | null) => (t ? t.slice(0, 5).replace(':', 'h') : '')
 
 const stars = (rating: number) => {
   const r = Math.max(0, Math.min(5, Math.round(Number(rating) || 0)))
   return '★'.repeat(r) + '☆'.repeat(5 - r)
 }
-
 const seatsLabel = (n: number) => (n > 0 ? `${n} place${n > 1 ? 's' : ''}` : 'Complet')
+const hoursUntil = (m: Pick<Meal, 'date' | 'time'>) => (parisDateTime(m.date, m.time).getTime() - Date.now()) / 3_600_000
+
+const MEAL_COLS = 'id, title, cuisine, price_per_seat, available_seats, max_seats, date, time, city, menu, tags, photo_url, rating, reviews_count, description, host_id, is_active, lat, lng'
+const PROFILE_COLS = 'id, full_name, avatar_url, bio, city, rating, reviews_count'
+
+/** Appel d'une route serveur, avec le jeton de session de l'utilisateur. */
+async function api<T>(path: string, body: unknown = {}): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error((json as { error?: string }).error || 'Le serveur ne répond pas. Réessayez dans un instant.')
+  return json as T
+}
 
 // ═════════════════════════════ DATA ═════════════════════════════
 
 async function fetchMeals(): Promise<Meal[]> {
   const { data, error } = await supabase
     .from('meals')
-    .select('*, profiles(full_name, avatar_url, rating, bio)')
+    .select(`${MEAL_COLS}, profiles(full_name, avatar_url, rating, bio)`)
     .eq('is_active', true)
+    .gte('date', todayParis())
     .order('date', { ascending: true })
   if (error) throw error
-  const today = todayISO()
-  // On masque les repas déjà passés.
-  return ((data || []) as Meal[]).filter(m => !m.date || m.date.slice(0, 10) >= today)
+  return (data || []) as unknown as Meal[]
 }
 
-async function fetchProfile(user: User): Promise<Profile | null> {
-  // Le profil est créé automatiquement par la base à l'inscription.
-  const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+async function fetchProfile(uid: string): Promise<Profile | null> {
+  const { data } = await supabase.from('profiles').select(PROFILE_COLS).eq('id', uid).maybeSingle()
   return (data as Profile | null) || null
 }
 
 async function fetchBookings(uid: string): Promise<Booking[]> {
   const { data } = await supabase.from('bookings')
-    .select('*, meals(*, profiles(full_name))')
+    .select(`id, meal_id, seats, total_amount, status, created_at, refunded_amount, meals(${MEAL_COLS}, profiles(full_name))`)
     .eq('guest_id', uid)
+    .neq('status', 'pending')
     .order('created_at', { ascending: false })
-  return (data || []) as Booking[]
+  return (data || []) as unknown as Booking[]
+}
+
+async function fetchMyReviewBookingIds(uid: string): Promise<Set<string>> {
+  const { data } = await supabase.from('reviews').select('booking_id').eq('reviewer_id', uid)
+  return new Set((data || []).map((r: { booking_id: string }) => r.booking_id))
 }
 
 async function fetchFavorites(uid: string): Promise<Meal[]> {
   const { data } = await supabase.from('favorites')
-    .select('meal_id, meals(*, profiles(full_name, avatar_url, rating, bio))')
+    .select(`meal_id, meals(${MEAL_COLS}, profiles(full_name, avatar_url, rating, bio))`)
     .eq('user_id', uid)
-  return ((data || []) as unknown as { meals: Meal | null }[]).map(f => f.meals).filter((m): m is Meal => Boolean(m))
+  return ((data || []) as unknown as { meals: Meal | null }[]).map(f => f.meals).filter((m): m is Meal => Boolean(m && m.is_active))
 }
 
 async function fetchReviews(mealId: string): Promise<Review[]> {
   const { data } = await supabase.from('reviews')
-    .select('*, profiles!reviews_reviewer_id_fkey(full_name)')
+    .select('id, rating, comment, created_at, profiles!reviews_reviewer_id_fkey(full_name)')
     .eq('meal_id', mealId)
     .order('created_at', { ascending: false })
-  return (data || []) as Review[]
+  return (data || []) as unknown as Review[]
 }
 
-async function fetchHostStats(uid: string) {
-  const { data: hostMeals } = await supabase.from('meals').select('id').eq('host_id', uid)
-  const ids = (hostMeals || []).map((m: { id: string }) => m.id)
-  let revenue = 0
-  let guests = 0
-  if (ids.length > 0) {
-    // Uniquement les réservations des repas de CET hôte.
-    const { data: hostBookings } = await supabase.from('bookings')
-      .select('total_amount, seats')
-      .in('meal_id', ids)
+async function fetchHostData(uid: string) {
+  const { data: meals } = await supabase.from('meals').select(MEAL_COLS).eq('host_id', uid).order('date', { ascending: false })
+  const list = (meals || []) as Meal[]
+  let bookings: HostBooking[] = []
+  if (list.length > 0) {
+    const { data } = await supabase.from('bookings')
+      .select('id, meal_id, seats, status, host_amount, profiles!bookings_guest_id_fkey(full_name)')
+      .in('meal_id', list.map(m => m.id))
       .eq('status', 'confirmed')
-    ;(hostBookings || []).forEach((b: { total_amount: number | null; seats: number | null }) => {
-      revenue += Number(b.total_amount) || 0
-      guests += Number(b.seats) || 0
-    })
+    bookings = (data || []) as unknown as HostBooking[]
   }
-  const { data: hostProfile } = await supabase.from('profiles').select('rating').eq('id', uid).maybeSingle()
-  return { meals: ids.length, revenue: money(revenue), guests, rating: Number(hostProfile?.rating) || 0 }
+  return { meals: list, bookings }
+}
+
+async function fetchMealAddress(mealId: string): Promise<string | null> {
+  const { data } = await supabase.from('meal_private').select('address').eq('meal_id', mealId).maybeSingle()
+  return (data as { address: string } | null)?.address ?? null
 }
 
 async function fetchConversations(uid: string): Promise<Conversation[]> {
@@ -240,14 +247,16 @@ type InpProps = {
   inputMode?: 'text' | 'numeric' | 'decimal' | 'email' | 'url'
   autoComplete?: string
   label?: string
+  hint?: ReactNode
 }
 
-const Inp = ({ placeholder, value, onChange, type = 'text', readOnly, min, maxLength, inputMode, autoComplete, label }: InpProps) => (
+const Inp = ({ placeholder, value, onChange, type = 'text', readOnly, min, maxLength, inputMode, autoComplete, label, hint }: InpProps) => (
   <label className="field">
     {label && <span className="field-label">{label}</span>}
     <input className="input" type={type} placeholder={placeholder} aria-label={label || placeholder} value={value} readOnly={readOnly}
       min={min} maxLength={maxLength} inputMode={inputMode} autoComplete={autoComplete}
       onChange={e => onChange?.(e.target.value)} />
+    {hint && <span className="field-hint">{hint}</span>}
   </label>
 )
 
@@ -264,7 +273,7 @@ const Avatar = ({ name, size = 36 }: { name?: string | null; size?: number }) =>
 type MealCardProps = { m: Meal; isFav: boolean; onOpen: (m: Meal) => void; onToggleFav: (id: string) => void }
 
 const MealCard = ({ m, isFav, onOpen, onToggleFav }: MealCardProps) => (
-  <article className="meal-card" onClick={() => onOpen(m)}>
+  <article className="meal-card" onClick={() => onOpen(m)} onKeyDown={e => { if (e.key === 'Enter') onOpen(m) }} tabIndex={0} role="button" aria-label={m.title}>
     <div className="meal-photo">
       <img src={mealPhoto(m, 700)} alt={m.title} loading="lazy" />
       <button className={`fav-btn${isFav ? ' on' : ''}`} aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
@@ -279,9 +288,12 @@ const MealCard = ({ m, isFav, onOpen, onToggleFav }: MealCardProps) => (
       <div className="meal-meta">
         <span>{m.city}</span><span>·</span><span>{fmtDate(m.date)}</span><span>·</span><span>{seatsLabel(m.available_seats)}</span>
       </div>
+      {(m.tags?.length || 0) > 0 && (
+        <div className="tag-row">{m.tags!.slice(0, 3).map(t => <span key={t} className="tag">{t}</span>)}</div>
+      )}
       <div className="meal-foot">
         <span className="meal-cuisine">{m.cuisine}</span>
-        <span className="meal-price">{eur(m.price_per_seat)} <small>/ couvert</small></span>
+        <span className="meal-price">{eur(displayPrice(m.price_per_seat))} <small>/ couvert</small></span>
       </div>
     </div>
   </article>
@@ -317,19 +329,22 @@ export default function Shareat() {
   const [mealsError, setMealsError] = useState('')
   const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null)
   const [mealReviews, setMealReviews] = useState<Review[]>([])
+  const [mealAddress, setMealAddress] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
+  const [authReady, setAuthReady] = useState(false)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [guests, setGuests] = useState(1)
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [showAuth, setShowAuth] = useState(false)
-  const [showBooking, setShowBooking] = useState(false)
-  const [bookingDone, setBookingDone] = useState(false)
-  const [bookedSeats, setBookedSeats] = useState(0)
+  const [acceptTerms, setAcceptTerms] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [bookingResult, setBookingResult] = useState<{ status: 'confirmed' | 'refunded' | 'unpaid'; meal: Meal | null; seats: number } | null>(null)
   const [toastMsg, setToastMsg] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [filterCuisine, setFilterCuisine] = useState('all')
+  const [filterTags, setFilterTags] = useState<string[]>([])
   const [searchCity, setSearchCity] = useState('')
   const [appliedCity, setAppliedCity] = useState('')
   const [dashTab, setDashTab] = useState<DashTab>('overview')
@@ -337,6 +352,7 @@ export default function Shareat() {
   const [sending, setSending] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
   const [favMeals, setFavMeals] = useState<Meal[]>([])
   const [loading, setLoading] = useState(false)
   const [hostTitle, setHostTitle] = useState('')
@@ -346,25 +362,38 @@ export default function Shareat() {
   const [hostTime, setHostTime] = useState('19:30')
   const [hostSeats, setHostSeats] = useState('')
   const [hostDesc, setHostDesc] = useState('')
-  const [hostCity, setHostCity] = useState('')
   const [hostMenu, setHostMenu] = useState('')
   const [hostPhoto, setHostPhoto] = useState('')
+  const [hostTags, setHostTags] = useState<string[]>([])
+  const [hostAddress, setHostAddress] = useState('')
+  const [addressMatches, setAddressMatches] = useState<GeoResult[]>([])
+  const [addressPick, setAddressPick] = useState<GeoResult | null>(null)
+  const [addressBusy, setAddressBusy] = useState(false)
   const [profileFname, setProfileFname] = useState('')
   const [profileLname, setProfileLname] = useState('')
   const [profileCity, setProfileCity] = useState('')
   const [profileBio, setProfileBio] = useState('')
-  const [hostStats, setHostStats] = useState({ meals: 0, revenue: 0, guests: 0, rating: 0 })
+  const [payouts, setPayouts] = useState<Payouts | null>(null)
+  const [payoutsBusy, setPayoutsBusy] = useState(false)
+  const [hostMeals, setHostMeals] = useState<Meal[]>([])
+  const [hostBookings, setHostBookings] = useState<HostBooking[]>([])
+  const [hostReload, setHostReload] = useState(0)
+  const [confirmAction, setConfirmAction] = useState<Confirm | null>(null)
+  const [reviewFor, setReviewFor] = useState<Booking | null>(null)
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewComment, setReviewComment] = useState('')
   const [selectedConvUser, setSelectedConvUser] = useState<ConvUser | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const bubblesRef = useRef<HTMLDivElement>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const returnHandled = useRef(false)
 
   const userId = user?.id ?? null
 
   const showToast = (msg: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
     setToastMsg(msg)
-    toastTimer.current = setTimeout(() => setToastMsg(''), 3500)
+    toastTimer.current = setTimeout(() => setToastMsg(''), 4500)
   }
 
   const nav = (p: Page) => {
@@ -391,9 +420,13 @@ export default function Shareat() {
       .catch(() => setMealsError('Impossible de charger les tables.'))
   }
 
+  const reloadBookings = (uid: string) => {
+    fetchBookings(uid).then(setBookings)
+    fetchMyReviewBookingIds(uid).then(setReviewedIds)
+  }
+
   // ── EFFETS ──
 
-  // Chargement initial des repas.
   useEffect(() => {
     let cancelled = false
     fetchMeals()
@@ -403,26 +436,25 @@ export default function Shareat() {
     return () => { cancelled = true }
   }, [])
 
-  // Session utilisateur.
   useEffect(() => {
     const handle = (session: Session | null) => {
       const u = session?.user ?? null
       setUser(prev => (prev?.id === u?.id ? (u ? prev : null) : u))
+      setAuthReady(true)
       if (u) setShowAuth(false)
       else {
         setProfile(null); setBookings([]); setFavMeals([]); setConversations([])
-        setMessages([]); setSelectedConvUser(null)
+        setMessages([]); setSelectedConvUser(null); setPayouts(null); setHostMeals([]); setHostBookings([])
       }
     }
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => handle(session))
     return () => subscription.unsubscribe()
   }, [])
 
-  // Profil + favoris dès qu'un utilisateur est connecté.
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
     let cancelled = false
-    fetchProfile(user).then(p => {
+    fetchProfile(userId).then(p => {
       if (cancelled || !p) return
       setProfile(p)
       const parts = (p.full_name || '').trim().split(/\s+/)
@@ -431,22 +463,77 @@ export default function Shareat() {
       setProfileCity(p.city || '')
       setProfileBio(p.bio || '')
     })
-    fetchFavorites(user.id).then(f => { if (!cancelled) setFavMeals(f) })
+    fetchFavorites(userId).then(f => { if (!cancelled) setFavMeals(f) })
+    fetchBookings(userId).then(b => { if (!cancelled) setBookings(b) })
+    // Finalise un éventuel paiement abouti dont le retour sur le site n'a pas eu lieu.
+    api<{ confirmed: number }>('/api/checkout/reconcile')
+      .then(r => { if (!cancelled && r.confirmed > 0) { fetchBookings(userId).then(setBookings); showToast('Votre paiement a été confirmé : réservation enregistrée.') } })
+      .catch(() => undefined)
+    supabase.from('host_payouts').select('transfers_active').eq('host_id', userId).maybeSingle()
+      // Ne jamais écraser un statut « actif » obtenu entre-temps auprès de Stripe (retour d'inscription).
+      .then(({ data }) => { if (!cancelled) setPayouts(prev => (prev?.active ? prev : { configured: Boolean(data), active: Boolean(data?.transfers_active) })) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 
-  // Données du tableau de bord.
+  // Retour depuis Stripe (paiement ou inscription aux versements).
+  useEffect(() => {
+    if (!authReady || returnHandled.current) return
+    const params = new URLSearchParams(window.location.search)
+    const paiement = params.get('paiement')
+    const versements = params.get('versements')
+    if (!paiement && !versements) return
+    returnHandled.current = true
+    window.history.replaceState({}, '', window.location.pathname)
+    // Traitement différé : évite des mises à jour d'état synchrones dans l'effet.
+    queueMicrotask(() => {
+    if (!userId) { requireAuth('Reconnectez-vous pour finaliser.'); return }
+
+    if (paiement === 'ok' && params.get('session_id')) {
+      api<{ status: 'confirmed' | 'refunded' | 'unpaid'; meal_id: string; seats: number }>('/api/checkout/confirm', { session_id: params.get('session_id') })
+        .then(async r => {
+          const { data } = await supabase.from('meals').select(`${MEAL_COLS}, profiles(full_name, avatar_url, rating, bio)`).eq('id', r.meal_id).maybeSingle()
+          setBookingResult({ status: r.status, meal: (data as Meal | null) ?? null, seats: r.seats })
+          reloadMeals()
+          reloadBookings(userId)
+        })
+        .catch(e => showToast(e.message))
+    } else if (paiement === 'annule' && params.get('reservation')) {
+      api('/api/bookings/cancel', { booking_id: params.get('reservation') }).catch(() => undefined)
+      showToast('Paiement annulé : aucune somme n’a été prélevée.')
+    } else if (versements === 'retour') {
+      setDashTab('host'); setPage('dashboard')
+      api<Payouts>('/api/connect/status')
+        .then(r => { setPayouts(r); showToast(r.active ? 'Versements activés : vous pouvez publier vos tables.' : 'Inscription Stripe incomplète : il reste des informations à fournir.') })
+        .catch(e => showToast(e.message))
+    } else if (versements === 'relancer') {
+      setDashTab('host'); setPage('dashboard')
+      api<{ url: string }>('/api/connect/onboard').then(r => { window.location.href = r.url }).catch(e => showToast(e.message))
+    }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, userId])
+
   useEffect(() => {
     if (page !== 'dashboard' || !userId) return
     let cancelled = false
     fetchBookings(userId).then(b => { if (!cancelled) setBookings(b) })
+    fetchMyReviewBookingIds(userId).then(s => { if (!cancelled) setReviewedIds(s) })
     fetchFavorites(userId).then(f => { if (!cancelled) setFavMeals(f) })
-    if (dashTab === 'host') fetchHostStats(userId).then(st => { if (!cancelled) setHostStats(st) })
+    if (dashTab === 'host') {
+      fetchHostData(userId).then(d => { if (!cancelled) { setHostMeals(d.meals); setHostBookings(d.bookings) } })
+    }
     return () => { cancelled = true }
-  }, [page, dashTab, userId])
+  }, [page, dashTab, userId, hostReload])
 
-  // Liste des conversations.
+  // Adresse exacte : seulement pour un invité ayant réservé (filtrée par la base).
+  const selectedId = selectedMeal?.id ?? null
+  useEffect(() => {
+    if (!selectedId || !userId) return
+    let cancelled = false
+    fetchMealAddress(selectedId).then(a => { if (!cancelled) setMealAddress(a) })
+    return () => { cancelled = true }
+  }, [selectedId, userId, bookings])
+
   useEffect(() => {
     if (page !== 'messages' || !userId) return
     let cancelled = false
@@ -454,7 +541,6 @@ export default function Shareat() {
     return () => { cancelled = true }
   }, [page, userId])
 
-  // Messages de la conversation ouverte + temps réel (un seul abonnement, nettoyé).
   const convId = selectedConvUser?.id ?? null
   useEffect(() => {
     if (!userId || !convId) return
@@ -471,7 +557,6 @@ export default function Shareat() {
     return () => { cancelled = true; supabase.removeChannel(channel) }
   }, [userId, convId])
 
-  // Défilement automatique en bas de la conversation.
   useEffect(() => {
     if (bubblesRef.current) bubblesRef.current.scrollTop = bubblesRef.current.scrollHeight
   }, [messages])
@@ -483,16 +568,25 @@ export default function Shareat() {
   const filtered = useMemo(() => {
     let r = meals
     if (filterCuisine !== 'all') r = r.filter(m => m.cuisine === filterCuisine)
+    if (filterTags.length > 0) r = r.filter(m => filterTags.every(t => m.tags?.includes(t)))
     const city = appliedCity.trim().toLowerCase()
     if (city) r = r.filter(m => m.city?.toLowerCase().includes(city))
     return r
-  }, [meals, filterCuisine, appliedCity])
+  }, [meals, filterCuisine, filterTags, appliedCity])
+
+  const mapPoints: MapPoint[] = useMemo(() => filtered
+    .filter(m => m.lat != null && m.lng != null)
+    .map(m => ({ id: m.id, lat: m.lat!, lng: m.lng!, title: m.title, label: eur(displayPrice(m.price_per_seat)) })), [filtered])
 
   const favIds = useMemo(() => new Set(favMeals.map(m => m.id)), [favMeals])
 
-  const total = selectedMeal ? money(selectedMeal.price_per_seat * guests) : 0
+  const total = selectedMeal ? money(displayPrice(selectedMeal.price_per_seat) * guests) : 0
   const isOwnMeal = Boolean(selectedMeal && user && selectedMeal.host_id === user.id)
   const soldOut = Boolean(selectedMeal && selectedMeal.available_seats <= 0)
+  const hasBooked = Boolean(selectedMeal && bookings.some(b => b.meal_id === selectedMeal.id && b.status === 'confirmed'))
+
+  const priceNum = parseFloat(hostPrice.replace(',', '.'))
+  const pricePreview = Number.isFinite(priceNum) && priceNum > 0 ? displayPrice(priceNum) : null
 
   // ── ACTIONS ──
 
@@ -500,8 +594,14 @@ export default function Shareat() {
     setSelectedMeal(m)
     setGuests(1)
     setMealReviews([])
+    setMealAddress(null)
     fetchReviews(m.id).then(setMealReviews)
     nav('detail')
+  }
+
+  const openMealById = (id: string) => {
+    const m = meals.find(x => x.id === id)
+    if (m) openMeal(m)
   }
 
   const openConversation = (other: ConvUser) => {
@@ -512,14 +612,15 @@ export default function Shareat() {
     nav('messages')
   }
 
-  const resetFilters = () => { setFilterCuisine('all'); setSearchCity(''); setAppliedCity('') }
+  const resetFilters = () => { setFilterCuisine('all'); setFilterTags([]); setSearchCity(''); setAppliedCity('') }
+  const toggleFilterTag = (t: string) => setFilterTags(prev => (prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]))
 
   const doLogin = async () => {
     if (!email.trim() || !password) { showToast('Email et mot de passe requis'); return }
     setLoading(true)
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     setLoading(false)
-    if (error) { showToast(error.message); return }
+    if (error) { showToast(error.message === 'Invalid login credentials' ? 'Email ou mot de passe incorrect' : error.message); return }
     setShowAuth(false)
     showToast('Bienvenue')
     setEmail(''); setPassword('')
@@ -529,13 +630,17 @@ export default function Shareat() {
     if (!fullName.trim()) { showToast('Indiquez votre prénom et votre nom'); return }
     if (!email.trim()) { showToast('Indiquez votre email'); return }
     if (password.length < 8) { showToast('Mot de passe trop court (8 caractères minimum)'); return }
+    if (!acceptTerms) { showToast('Acceptez les conditions et confirmez avoir 18 ans pour créer un compte'); return }
     setLoading(true)
-    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: fullName.trim() } } })
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(), password,
+      options: { data: { full_name: fullName.trim() }, emailRedirectTo: window.location.origin },
+    })
     setLoading(false)
     if (error) { showToast(error.message); return }
     setShowAuth(false)
     showToast(data.session ? 'Compte créé, bienvenue' : 'Compte créé. Confirmez votre adresse depuis l’email reçu.')
-    setEmail(''); setPassword(''); setFullName('')
+    setEmail(''); setPassword(''); setFullName(''); setAcceptTerms(false)
   }
 
   const doLogout = async () => {
@@ -545,44 +650,83 @@ export default function Shareat() {
     showToast('À bientôt')
   }
 
-  const openBooking = () => {
+  const startPayment = async () => {
     if (!user) { requireAuth('Connectez-vous pour réserver'); return }
+    if (!selectedMeal) return
     if (isOwnMeal) { showToast('Vous ne pouvez pas réserver votre propre table'); return }
     if (soldOut) { showToast('Cette table est complète'); return }
-    setBookingDone(false)
-    setShowBooking(true)
+    setPaying(true)
+    try {
+      const { url } = await api<{ url: string }>('/api/checkout', { meal_id: selectedMeal.id, seats: guests })
+      window.location.href = url
+    } catch (e) {
+      setPaying(false)
+      showToast((e as Error).message)
+    }
   }
 
-  const createBooking = async () => {
-    if (!user || !selectedMeal) return
-    setLoading(true)
-    // On revérifie les places restantes juste avant de réserver.
-    const { data: fresh } = await supabase.from('meals').select('available_seats').eq('id', selectedMeal.id).maybeSingle()
-    const seatsLeft = fresh ? Number(fresh.available_seats) : selectedMeal.available_seats
-    if (seatsLeft < guests) {
-      setLoading(false)
-      showToast(seatsLeft > 0 ? `Plus que ${seatsLeft} place(s) disponible(s)` : 'Cette table est complète')
-      setSelectedMeal({ ...selectedMeal, available_seats: Math.max(0, seatsLeft) })
-      setGuests(g => Math.max(1, Math.min(g, seatsLeft)))
-      return
+  const startPayoutsOnboarding = async () => {
+    setPayoutsBusy(true)
+    try {
+      const { url } = await api<{ url: string }>('/api/connect/onboard')
+      window.location.href = url
+    } catch (e) {
+      setPayoutsBusy(false)
+      showToast((e as Error).message)
     }
-    const { error } = await supabase.from('bookings').insert({
-      meal_id: selectedMeal.id,
-      guest_id: user.id,
-      seats: guests,
-      total_amount: total,
-      status: 'confirmed'
+  }
+
+  const openPayoutsDashboard = async () => {
+    setPayoutsBusy(true)
+    try {
+      const { url } = await api<{ url: string }>('/api/connect/dashboard')
+      window.location.href = url
+    } catch (e) {
+      showToast((e as Error).message)
+    } finally {
+      setPayoutsBusy(false)
+    }
+  }
+
+  const runConfirmAction = async () => {
+    if (!confirmAction || !userId) return
+    setLoading(true)
+    try {
+      if (confirmAction.kind === 'booking') {
+        const r = await api<{ refunded: number }>('/api/bookings/cancel', { booking_id: confirmAction.id })
+        showToast(r.refunded > 0 ? `Réservation annulée : ${eur(r.refunded)} remboursés sous 5 à 10 jours.` : 'Réservation annulée')
+        reloadBookings(userId)
+      } else {
+        const r = await api<{ refunded_guests: number }>('/api/meals/cancel', { meal_id: confirmAction.id })
+        showToast(r.refunded_guests > 0 ? `Table annulée : ${r.refunded_guests} invité(s) remboursé(s).` : 'Table annulée')
+        setHostReload(n => n + 1)
+      }
+      reloadMeals()
+      setConfirmAction(null)
+    } catch (e) {
+      showToast((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const submitReview = async () => {
+    if (!user || !reviewFor?.meals) return
+    setLoading(true)
+    const { error } = await supabase.from('reviews').insert({
+      booking_id: reviewFor.id,
+      reviewer_id: user.id,
+      reviewed_id: reviewFor.meals.host_id,
+      meal_id: reviewFor.meal_id,
+      rating: reviewRating,
+      comment: reviewComment.trim() || null,
+      type: 'guest_to_host',
     })
     setLoading(false)
-    if (error) {
-      showToast(/places/i.test(error.message) ? 'Plus assez de places disponibles' : 'Erreur : ' + error.message)
-      return
-    }
-    // Les places restantes sont décrémentées par la base (trigger).
-    setBookedSeats(guests)
-    setSelectedMeal({ ...selectedMeal, available_seats: seatsLeft - guests })
-    setGuests(1)
-    setBookingDone(true)
+    if (error) { showToast(error.code === '23505' ? 'Vous avez déjà laissé un avis pour ce repas' : 'Avis impossible : ' + error.message); return }
+    showToast('Merci pour votre avis')
+    setReviewFor(null); setReviewComment(''); setReviewRating(5)
+    reloadBookings(user.id)
     reloadMeals()
   }
 
@@ -597,7 +741,7 @@ export default function Shareat() {
       const meal = meals.find(m => m.id === mealId) || (selectedMeal?.id === mealId ? selectedMeal : null)
       if (meal) setFavMeals(prev => [...prev, meal])
       const { error } = await supabase.from('favorites').insert({ user_id: user.id, meal_id: mealId })
-      if (error) {
+      if (error && error.code !== '23505') {
         setFavMeals(prev => prev.filter(m => m.id !== mealId))
         showToast(error.message)
         return
@@ -625,19 +769,34 @@ export default function Shareat() {
     fetchConversations(user.id).then(setConversations)
   }
 
+  const searchAddress = async () => {
+    setAddressBusy(true)
+    setAddressPick(null)
+    try {
+      const results = await geocodeAddress(hostAddress)
+      setAddressMatches(results)
+      if (results.length === 0) showToast('Adresse introuvable : précisez le numéro, la rue et la ville.')
+      if (results.length === 1) { setAddressPick(results[0]); setAddressMatches([]) }
+    } catch {
+      showToast('Le service d’adresses ne répond pas. Réessayez dans un instant.')
+    } finally {
+      setAddressBusy(false)
+    }
+  }
+
   const publishMeal = async () => {
     if (!user) { requireAuth(); return }
-    if (!hostTitle.trim() || !hostPrice || !hostDate || !hostSeats || !hostCity.trim()) {
-      showToast('Remplissez tous les champs obligatoires'); return
-    }
+    if (!payouts?.active) { showToast('Activez vos versements avant de publier'); return }
+    if (!hostTitle.trim() || !hostPrice || !hostDate || !hostSeats) { showToast('Remplissez tous les champs obligatoires'); return }
+    if (!addressPick) { showToast('Vérifiez votre adresse avant de publier'); return }
     const price = parseFloat(hostPrice.replace(',', '.'))
     const seats = Number(hostSeats)
-    if (!Number.isFinite(price) || price <= 0) { showToast('Prix invalide'); return }
+    if (!Number.isFinite(price) || price <= 0 || price > 500) { showToast('Prix invalide (entre 1 et 500 €)'); return }
     if (!Number.isInteger(seats) || seats < 1 || seats > 50) { showToast('Nombre de couverts invalide (1 à 50)'); return }
-    if (hostDate < todayISO()) { showToast('La date doit être aujourd’hui ou plus tard'); return }
+    if (hostDate < todayParis()) { showToast('La date doit être aujourd’hui ou plus tard'); return }
     if (hostPhoto.trim() && !isHttpsUrl(hostPhoto)) { showToast('Le lien de la photo doit commencer par https://'); return }
     setLoading(true)
-    const { error } = await supabase.from('meals').insert({
+    const { data: created, error } = await supabase.from('meals').insert({
       host_id: user.id,
       title: hostTitle.trim(),
       cuisine: hostCuisine,
@@ -646,19 +805,25 @@ export default function Shareat() {
       available_seats: seats,
       date: hostDate,
       time: hostTime || '19:30',
-      city: hostCity.trim(),
+      city: addressPick.city || addressPick.label,
       description: hostDesc.trim(),
       menu: hostMenu.split('\n').map(l => l.trim()).filter(Boolean),
-      tags: [],
+      tags: hostTags,
       is_active: true,
-      photo_url: hostPhoto.trim() || null
+      photo_url: hostPhoto.trim() || null,
+      lat: approx(addressPick.lat),
+      lng: approx(addressPick.lng),
+    }).select('id').single()
+    if (error || !created) { setLoading(false); showToast(error?.message || 'Publication impossible'); return }
+    const { error: addrError } = await supabase.from('meal_private').insert({
+      meal_id: created.id, address: addressPick.label, lat: addressPick.lat, lng: addressPick.lng,
     })
     setLoading(false)
-    if (error) { showToast(error.message); return }
-    showToast('Votre table est publiée')
+    if (addrError) showToast('Table publiée, mais l’adresse n’a pas pu être enregistrée : ' + addrError.message)
+    else showToast('Votre table est publiée')
     reloadMeals()
-    fetchHostStats(user.id).then(setHostStats)
-    setHostTitle(''); setHostPrice(''); setHostDate(''); setHostSeats(''); setHostCity(''); setHostDesc(''); setHostMenu(''); setHostPhoto('')
+    setHostReload(n => n + 1)
+    setHostTitle(''); setHostPrice(''); setHostDate(''); setHostSeats(''); setHostDesc(''); setHostMenu(''); setHostPhoto(''); setHostTags([])
   }
 
   const saveProfile = async () => {
@@ -666,12 +831,11 @@ export default function Shareat() {
     const full_name = `${profileFname.trim()} ${profileLname.trim()}`.trim()
     if (!full_name) { showToast('Indiquez au moins votre prénom'); return }
     setLoading(true)
-    // update (et non upsert) : la base n'autorise que la modification de son profil.
     const { data, error } = await supabase.from('profiles').update({
       full_name,
       city: profileCity.trim(),
       bio: profileBio.trim()
-    }).eq('id', user.id).select('*').maybeSingle()
+    }).eq('id', user.id).select(PROFILE_COLS).maybeSingle()
     setLoading(false)
     if (error) { showToast(error.message); return }
     if (data) setProfile(data as Profile)
@@ -687,13 +851,27 @@ export default function Shareat() {
       ? <><p>Aucune table ne correspond à votre recherche.</p><button className="btn btn-ghost" onClick={resetFilters}>Réinitialiser les filtres</button></>
       : <><p className="empty-title">Les premières tables arrivent.</p><p>Shareat vient d’ouvrir : proposez la vôtre et accueillez vos premiers invités.</p><button className="btn btn-primary" onClick={() => nav('become')}>Proposer une table</button></>
 
-  const cuisineChips = (
-    <div className="chips" role="tablist" aria-label="Cuisine">
-      {['all', ...CUISINES].map(c => (
-        <button key={c} role="tab" aria-selected={filterCuisine === c} className={`chip${filterCuisine === c ? ' on' : ''}`} onClick={() => setFilterCuisine(c)}>
-          {c === 'all' ? 'Toutes' : c}
-        </button>
-      ))}
+  const filters = (
+    <div className="filters">
+      <div className="chips" role="group" aria-label="Cuisine">
+        {['all', ...CUISINES].map(c => (
+          <button key={c} aria-pressed={filterCuisine === c} className={`chip${filterCuisine === c ? ' on' : ''}`} onClick={() => setFilterCuisine(c)}>
+            {c === 'all' ? 'Toutes les cuisines' : c}
+          </button>
+        ))}
+      </div>
+      <div className="chips" role="group" aria-label="Catégories">
+        {CATEGORIES.map(t => (
+          <button key={t} aria-pressed={filterTags.includes(t)} className={`chip chip-soft${filterTags.includes(t) ? ' on' : ''}`} onClick={() => toggleFilterTag(t)}>{t}</button>
+        ))}
+      </div>
+    </div>
+  )
+
+  const cityFilter = (
+    <div className="explore-bar">
+      <input className="input input-pill" value={searchCity} onChange={e => { setSearchCity(e.target.value); setAppliedCity(e.target.value) }} placeholder="Filtrer par ville…" aria-label="Filtrer par ville" />
+      {!mealsLoading && <span className="muted">{filtered.length} table{filtered.length > 1 ? 's' : ''}</span>}
     </div>
   )
 
@@ -703,14 +881,17 @@ export default function Shareat() {
 
   const dashTabs: [DashTab, string][] = [['overview', 'Vue d’ensemble'], ['bookings', 'Réservations'], ['favorites', 'Favoris'], ['profile', 'Mon profil'], ['host', 'Espace hôte']]
 
+  const hostSeatsBooked = (mealId: string) => hostBookings.filter(b => b.meal_id === mealId).reduce((s, b) => s + b.seats, 0)
+  const hostEarned = hostBookings.reduce((s, b) => s + (Number(b.host_amount) || 0), 0)
+
   return (
     <div className="shell">
 
-      {/* ── NAV ── */}
       <header className="nav">
         <button className="logo" onClick={() => nav('home')} aria-label="Shareat, accueil">Shareat</button>
         <nav className="nav-links">
           {navLink('explore', 'Explorer')}
+          {navLink('map', 'Carte')}
           {navLink('messages', 'Messages')}
           {navLink('become', 'Devenir hôte')}
           {user ? (
@@ -763,7 +944,13 @@ export default function Shareat() {
               </div>
               {meals.length > 0 && <button className="link" onClick={() => nav('explore')}>Tout voir →</button>}
             </div>
-            {meals.length > 0 && cuisineChips}
+            {meals.length > 0 && (
+              <div className="chips" role="group" aria-label="Catégories">
+                {CATEGORIES.map(t => (
+                  <button key={t} aria-pressed={filterTags.includes(t)} className={`chip chip-soft${filterTags.includes(t) ? ' on' : ''}`} onClick={() => toggleFilterTag(t)}>{t}</button>
+                ))}
+              </div>
+            )}
             <Grid data={filtered.slice(0, 8)} loading={mealsLoading} empty={emptyState} {...gridProps} />
           </section>
 
@@ -771,9 +958,9 @@ export default function Shareat() {
             <p className="eyebrow">Comment ça marche</p>
             <h2 className="title">Trois étapes, une table</h2>
             <div className="steps">
-              {[['01', 'Cherchez', 'Filtrez les tables par ville et par cuisine, et découvrez le menu de chaque hôte.'],
+              {[['01', 'Cherchez', 'Filtrez les tables par ville, cuisine ou catégorie (repas étudiant, halal, casher, végétarien…) ou parcourez la carte.'],
                 ['02', 'Échangez', 'Posez vos questions à l’hôte par message avant de réserver.'],
-                ['03', 'Réservez', 'Réservez votre place en ligne, puis réglez votre repas directement auprès de l’hôte.']].map(([n, t, d]) => (
+                ['03', 'Réservez et payez', 'Payez en ligne de façon sécurisée avec Stripe. L’adresse exacte vous est communiquée après la réservation.']].map(([n, t, d]) => (
                 <div key={n} className="step">
                   <span className="step-num">{n}</span>
                   <h3>{t}</h3>
@@ -789,7 +976,7 @@ export default function Shareat() {
               <div className="banner-txt">
                 <p className="eyebrow">Hôtes</p>
                 <h2 className="title">Ouvrez votre table</h2>
-                <p>Partagez votre cuisine, fixez vos dates et votre prix, et rencontrez vos invités.</p>
+                <p>Fixez votre prix, vos dates et vos catégories. Les paiements vous sont versés automatiquement.</p>
                 <button className="btn btn-primary" onClick={() => nav('become')}>Devenir hôte</button>
               </div>
             </div>
@@ -802,11 +989,24 @@ export default function Shareat() {
         <section className="section">
           <p className="eyebrow">Explorer</p>
           <h1 className="title-xl">Toutes les tables</h1>
-          <div className="explore-bar">
-            <input className="input input-pill" value={searchCity} onChange={e => { setSearchCity(e.target.value); setAppliedCity(e.target.value) }} placeholder="Filtrer par ville…" aria-label="Filtrer par ville" />
-            {!mealsLoading && <span className="muted">{filtered.length} table{filtered.length > 1 ? 's' : ''}</span>}
-          </div>
-          {cuisineChips}
+          {cityFilter}
+          {filters}
+          <Grid data={filtered} loading={mealsLoading} empty={emptyState} {...gridProps} />
+        </section>
+      )}
+
+      {/* ══ CARTE ══ */}
+      {page === 'map' && (
+        <section className="section">
+          <p className="eyebrow">Carte</p>
+          <h1 className="title-xl">Les tables près de chez vous</h1>
+          {cityFilter}
+          {filters}
+          <MealMap points={mapPoints} onSelect={openMealById} />
+          <p className="muted small map-note">Les positions sont approximatives (environ 1 km) : l’adresse exacte est communiquée après la réservation.</p>
+          {!mealsLoading && filtered.length > 0 && mapPoints.length < filtered.length && (
+            <p className="muted small">{filtered.length - mapPoints.length} table(s) sans position ne sont pas affichées sur la carte.</p>
+          )}
           <Grid data={filtered} loading={mealsLoading} empty={emptyState} {...gridProps} />
         </section>
       )}
@@ -832,6 +1032,10 @@ export default function Shareat() {
                 {(selectedMeal.rating || 0) > 0 && <div><span>Note</span><strong>★ {Number(selectedMeal.rating).toFixed(1)} ({selectedMeal.reviews_count ?? 0})</strong></div>}
               </div>
 
+              {(selectedMeal.tags?.length || 0) > 0 && (
+                <div className="tag-row tag-row-lg">{selectedMeal.tags!.map(t => <span key={t} className="tag">{t}</span>)}</div>
+              )}
+
               {selectedMeal.description && <p className="prose">{selectedMeal.description}</p>}
 
               <div className="host-card">
@@ -855,6 +1059,16 @@ export default function Shareat() {
                 </>
               )}
 
+              <h2 className="title">Lieu</h2>
+              {mealAddress
+                ? <p className="address">{mealAddress}</p>
+                : <p className="muted">{selectedMeal.city}. L’adresse exacte vous est communiquée après la réservation.</p>}
+              {selectedMeal.lat != null && selectedMeal.lng != null && (
+                <div className="detail-map">
+                  <MealMap points={[{ id: selectedMeal.id, lat: selectedMeal.lat, lng: selectedMeal.lng, title: selectedMeal.title, label: '' }]} area height={280} />
+                </div>
+              )}
+
               <h2 className="title">Avis</h2>
               {mealReviews.length === 0
                 ? <p className="muted">Pas encore d’avis pour cette table.</p>
@@ -868,13 +1082,16 @@ export default function Shareat() {
                   </div>
                 ))
               }
-              {!isHttpsUrl(selectedMeal.photo_url) && <p className="muted small photo-note">Photo d’illustration.</p>}
+              <p className="muted small">Les avis sont publiés uniquement par des invités ayant réservé et payé ce repas, après sa date.</p>
+              {!isHttpsUrl(selectedMeal.photo_url) && <p className="muted small">Photo d’illustration.</p>}
             </div>
 
             <aside className="book-card">
-              <p className="book-price">{eur(selectedMeal.price_per_seat)} <small>/ couvert</small></p>
+              <p className="book-price">{eur(displayPrice(selectedMeal.price_per_seat))} <small>/ couvert</small></p>
               {isOwnMeal ? (
                 <p className="muted">C’est votre table. Suivez vos réservations depuis l’espace hôte.</p>
+              ) : hasBooked ? (
+                <p className="muted">Vous avez réservé cette table. Retrouvez-la dans vos réservations.</p>
               ) : soldOut ? (
                 <p className="muted">Cette table est complète.</p>
               ) : (
@@ -887,10 +1104,10 @@ export default function Shareat() {
                       <button aria-label="Plus" disabled={guests >= selectedMeal.available_seats} onClick={() => setGuests(g => Math.min(selectedMeal.available_seats, g + 1))}>+</button>
                     </div>
                   </div>
-                  <div className="book-line"><span>{eur(selectedMeal.price_per_seat)} × {guests}</span><span>{eur(total)}</span></div>
+                  <div className="book-line"><span>{eur(displayPrice(selectedMeal.price_per_seat))} × {guests}</span><span>{eur(total)}</span></div>
                   <div className="book-line book-total"><span>Total</span><span>{eur(total)}</span></div>
-                  <button className="btn btn-primary btn-block" onClick={openBooking}>Réserver ma place</button>
-                  <p className="muted small">Aucun paiement en ligne : le repas se règle directement auprès de l’hôte.</p>
+                  <button className="btn btn-primary btn-block" onClick={startPayment} disabled={paying}>{paying ? 'Redirection vers le paiement…' : 'Réserver et payer'}</button>
+                  <p className="muted small">Paiement sécurisé par Stripe. Annulation gratuite et remboursement intégral jusqu’à {FREE_CANCELLATION_HOURS} h avant le repas.</p>
                 </>
               )}
             </aside>
@@ -971,7 +1188,7 @@ export default function Shareat() {
                   <>
                     <h2 className="title">Bonjour {profile?.full_name?.split(' ')[0] || ''}</h2>
                     <div className="stats">
-                      {[[bookings.length, 'Réservations'], [favMeals.length, 'Favoris'], [meals.length, 'Tables à venir']].map(([v, l]) => (
+                      {[[bookings.filter(b => b.status === 'confirmed').length, 'Réservations'], [favMeals.length, 'Favoris'], [meals.length, 'Tables à venir']].map(([v, l]) => (
                         <div key={l} className="stat"><strong>{v}</strong><span>{l}</span></div>
                       ))}
                     </div>
@@ -985,18 +1202,29 @@ export default function Shareat() {
                     <h2 className="title">Mes réservations</h2>
                     {bookings.length === 0
                       ? <div className="empty"><p>Aucune réservation pour l’instant.</p><button className="btn btn-primary" onClick={() => nav('explore')}>Explorer les tables</button></div>
-                      : bookings.map(b => (
-                        <div key={b.id} className="booking" onClick={() => { if (b.meals) openMeal(b.meals) }}>
-                          {b.meals && <img src={mealPhoto(b.meals, 300)} alt="" />}
-                          <div className="booking-txt">
-                            <strong>{b.meals?.title || 'Table supprimée'}</strong>
-                            <span className="muted small">{b.meals ? `${b.meals.city} · ${fmtDate(b.meals.date)} · ` : ''}{b.seats} couvert{b.seats > 1 ? 's' : ''} · {eur(b.total_amount)} à régler sur place</span>
+                      : bookings.map(b => {
+                        const past = b.meals ? b.meals.date.slice(0, 10) <= todayParis() : false
+                        const canCancel = b.status === 'confirmed' && b.meals && hoursUntil(b.meals) >= FREE_CANCELLATION_HOURS
+                        const canReview = b.status === 'confirmed' && past && !reviewedIds.has(b.id)
+                        return (
+                          <div key={b.id} className="booking">
+                            {b.meals && <img src={mealPhoto(b.meals, 300)} alt="" onClick={() => openMeal(b.meals!)} />}
+                            <div className="booking-txt">
+                              <strong>{b.meals?.title || 'Table supprimée'}</strong>
+                              <span className="muted small">{b.meals ? `${b.meals.city} · ${fmtDate(b.meals.date)} à ${fmtTime(b.meals.time)} · ` : ''}{b.seats} couvert{b.seats > 1 ? 's' : ''} · {eur(b.total_amount)} payés</span>
+                              {b.status === 'cancelled' && (b.refunded_amount || 0) > 0 && <span className="muted small">Remboursé : {eur(b.refunded_amount!)}</span>}
+                              <span className="row-actions">
+                                {canCancel && <button className="link" onClick={() => setConfirmAction({ kind: 'booking', id: b.id, title: b.meals?.title || '', refundable: true })}>Annuler</button>}
+                                {canReview && <button className="link" onClick={() => { setReviewFor(b); setReviewRating(5); setReviewComment('') }}>Laisser un avis</button>}
+                                {b.meals && !past && <button className="link" onClick={() => openConversation({ id: b.meals!.host_id, name: b.meals!.profiles?.full_name || 'Hôte' })}>Écrire à l’hôte</button>}
+                              </span>
+                            </div>
+                            <span className={`status status-${b.status}`}>
+                              {b.status === 'confirmed' ? (past ? 'Passée' : 'Confirmée') : b.status === 'cancelled' ? 'Annulée' : 'Terminée'}
+                            </span>
                           </div>
-                          <span className={`status status-${b.status}`}>
-                            {b.status === 'confirmed' ? 'Confirmée' : b.status === 'pending' ? 'En attente' : b.status === 'cancelled' ? 'Annulée' : 'Terminée'}
-                          </span>
-                        </div>
-                      ))
+                        )
+                      })
                     }
                   </>
                 )}
@@ -1022,45 +1250,122 @@ export default function Shareat() {
                       <textarea className="input" value={profileBio} onChange={e => setProfileBio(e.target.value)} placeholder="Vos passions culinaires, d’où vous venez…" rows={3} aria-label="Bio" />
                     </label>
                     <button type="submit" className="btn btn-primary" disabled={loading}>Enregistrer</button>
+                    <p className="muted small form-note">Pour exporter vos données ou supprimer votre compte, consultez la <Link className="inline-link" href="/confidentialite">politique de confidentialité</Link>.</p>
                   </form>
                 )}
 
                 {dashTab === 'host' && (
-                  <form onSubmit={e => { e.preventDefault(); publishMeal() }}>
+                  <>
                     <h2 className="title">Espace hôte</h2>
+
+                    <div className={`payout-card${payouts?.active ? ' ok' : ''}`}>
+                      <div>
+                        <p className="subtitle payout-title">Versements</p>
+                        {payouts?.active
+                          ? <p>Vos versements sont activés. Pour chaque réservation, vous recevez votre prix ; Shareat ajoute {Math.round(COMMISSION_RATE * 100)} % payés par l’invité.</p>
+                          : <p>Pour publier une table et être payé, reliez un compte de versement Stripe (identité et IBAN). Cela prend environ 5 minutes.</p>}
+                      </div>
+                      {payouts?.active
+                        ? <button className="btn btn-ghost" onClick={openPayoutsDashboard} disabled={payoutsBusy}>Voir mes versements</button>
+                        : <button className="btn btn-primary" onClick={startPayoutsOnboarding} disabled={payoutsBusy}>{payoutsBusy ? 'Redirection…' : payouts?.configured ? 'Terminer mon inscription' : 'Activer mes versements'}</button>}
+                    </div>
+
                     <div className="stats">
-                      {[[hostStats.meals, 'Tables publiées'], [hostStats.guests, 'Invités confirmés'], [eur(hostStats.revenue), 'Montant réservé'], [hostStats.rating > 0 ? `★ ${hostStats.rating.toFixed(1)}` : '—', 'Note hôte']].map(([v, l]) => (
+                      {[[hostMeals.length, 'Tables publiées'], [hostBookings.reduce((s, b) => s + b.seats, 0), 'Invités confirmés'], [eur(hostEarned), 'Vos gains'], [profile?.rating ? `★ ${Number(profile.rating).toFixed(1)}` : '—', 'Note hôte']].map(([v, l]) => (
                         <div key={l} className="stat"><strong>{v}</strong><span>{l}</span></div>
                       ))}
                     </div>
-                    <h3 className="subtitle">Proposer une table</h3>
-                    <Inp label="Titre *" placeholder="Couscous du dimanche" value={hostTitle} onChange={setHostTitle} maxLength={120} />
-                    <div className="two-col">
-                      <label className="field">
-                        <span className="field-label">Cuisine</span>
-                        <select className="input" value={hostCuisine} onChange={e => setHostCuisine(e.target.value)} aria-label="Cuisine">
-                          {CUISINES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </label>
-                      <Inp label="Prix par couvert (€) *" placeholder="20" value={hostPrice} onChange={setHostPrice} type="number" min="1" inputMode="decimal" />
-                    </div>
-                    <Inp label="Ville *" placeholder="Lyon" value={hostCity} onChange={setHostCity} />
-                    <div className="two-col">
-                      <Inp label="Date *" placeholder="Date" value={hostDate} onChange={setHostDate} type="date" min={todayISO()} />
-                      <Inp label="Heure" placeholder="Heure" value={hostTime} onChange={setHostTime} type="time" />
-                    </div>
-                    <Inp label="Nombre de couverts *" placeholder="6" value={hostSeats} onChange={setHostSeats} type="number" min="1" inputMode="numeric" />
-                    <Inp label="Photo de votre plat (lien https, facultatif)" placeholder="https://…" value={hostPhoto} onChange={setHostPhoto} type="url" inputMode="url" />
-                    <label className="field">
-                      <span className="field-label">Description</span>
-                      <textarea className="input" value={hostDesc} onChange={e => setHostDesc(e.target.value)} placeholder="L’ambiance, l’histoire du plat…" rows={3} aria-label="Description" />
-                    </label>
-                    <label className="field">
-                      <span className="field-label">Menu (un plat par ligne)</span>
-                      <textarea className="input" value={hostMenu} onChange={e => setHostMenu(e.target.value)} placeholder={'Entrée : salade de saison\nPlat : couscous\nDessert : cornes de gazelle'} rows={4} aria-label="Menu" />
-                    </label>
-                    <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Publication…' : 'Publier ma table'}</button>
-                  </form>
+
+                    {hostMeals.length > 0 && (
+                      <>
+                        <h3 className="subtitle">Mes tables</h3>
+                        {hostMeals.map(m => {
+                          const booked = hostSeatsBooked(m.id)
+                          const upcoming = m.is_active && m.date.slice(0, 10) >= todayParis()
+                          return (
+                            <div key={m.id} className="booking">
+                              <img src={mealPhoto(m, 300)} alt="" />
+                              <div className="booking-txt">
+                                <strong>{m.title}</strong>
+                                <span className="muted small">{m.city} · {fmtDate(m.date)} à {fmtTime(m.time)} · {booked} / {m.max_seats ?? m.available_seats + booked} places réservées</span>
+                                {upcoming && (
+                                  <span className="row-actions">
+                                    <button className="link" onClick={() => openMeal(m)}>Voir</button>
+                                    <button className="link danger-link" onClick={() => setConfirmAction({ kind: 'meal', id: m.id, title: m.title, guests: booked })}>Annuler la table</button>
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`status ${upcoming ? 'status-confirmed' : m.is_active ? 'status-completed' : 'status-cancelled'}`}>{upcoming ? 'En ligne' : m.is_active ? 'Passée' : 'Annulée'}</span>
+                            </div>
+                          )
+                        })}
+                      </>
+                    )}
+
+                    <form onSubmit={e => { e.preventDefault(); publishMeal() }}>
+                      <h3 className="subtitle">Proposer une table</h3>
+                      <fieldset className="fieldset" disabled={!payouts?.active}>
+                        <Inp label="Titre *" placeholder="Couscous du dimanche" value={hostTitle} onChange={setHostTitle} maxLength={120} />
+                        <div className="two-col">
+                          <label className="field">
+                            <span className="field-label">Cuisine</span>
+                            <select className="input" value={hostCuisine} onChange={e => setHostCuisine(e.target.value)} aria-label="Cuisine">
+                              {CUISINES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          </label>
+                          <Inp label="Votre prix par couvert (€) *" placeholder="20" value={hostPrice} onChange={setHostPrice} type="number" min="1" inputMode="decimal"
+                            hint={pricePreview != null ? <>Vous recevez {eur(priceNum)} par couvert. Prix affiché aux invités : {eur(pricePreview)} (commission Shareat {Math.round(COMMISSION_RATE * 100)} %).</> : undefined} />
+                        </div>
+
+                        <div className="field">
+                          <span className="field-label">Catégories (plusieurs possibles)</span>
+                          <div className="chips chips-wrap" role="group" aria-label="Catégories du repas">
+                            {CATEGORIES.map(t => (
+                              <button type="button" key={t} aria-pressed={hostTags.includes(t)} className={`chip chip-soft${hostTags.includes(t) ? ' on' : ''}`}
+                                onClick={() => setHostTags(prev => (prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]))}>{t}</button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="field">
+                          <span className="field-label">Adresse du repas *</span>
+                          <div className="address-row">
+                            <input className="input" value={hostAddress} onChange={e => { setHostAddress(e.target.value); setAddressPick(null); setAddressMatches([]) }}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchAddress() } }}
+                              placeholder="12 rue des Lilas, 33000 Bordeaux" aria-label="Adresse du repas" autoComplete="street-address" />
+                            <button type="button" className="btn btn-ghost" onClick={searchAddress} disabled={addressBusy || hostAddress.trim().length < 5}>{addressBusy ? 'Recherche…' : 'Vérifier'}</button>
+                          </div>
+                          {addressMatches.length > 1 && (
+                            <div className="address-matches">
+                              {addressMatches.map(r => (
+                                <button type="button" key={r.label + r.lat} className="address-match" onClick={() => { setAddressPick(r); setHostAddress(r.label); setAddressMatches([]) }}>{r.label}</button>
+                              ))}
+                            </div>
+                          )}
+                          {addressPick
+                            ? <span className="field-hint ok-hint">Adresse vérifiée : {addressPick.label}. Seule une zone d’environ 1 km est affichée publiquement ; l’adresse exacte est envoyée aux invités après paiement.</span>
+                            : <span className="field-hint">L’adresse exacte reste privée jusqu’à la réservation.</span>}
+                        </div>
+
+                        <div className="two-col">
+                          <Inp label="Date *" placeholder="Date" value={hostDate} onChange={setHostDate} type="date" min={todayParis()} />
+                          <Inp label="Heure" placeholder="Heure" value={hostTime} onChange={setHostTime} type="time" />
+                        </div>
+                        <Inp label="Nombre de couverts *" placeholder="6" value={hostSeats} onChange={setHostSeats} type="number" min="1" inputMode="numeric" />
+                        <Inp label="Photo de votre plat (lien https, facultatif)" placeholder="https://…" value={hostPhoto} onChange={setHostPhoto} type="url" inputMode="url" />
+                        <label className="field">
+                          <span className="field-label">Description (ambiance, allergènes…)</span>
+                          <textarea className="input" value={hostDesc} onChange={e => setHostDesc(e.target.value)} placeholder="L’ambiance, l’histoire du plat, les allergènes présents…" rows={3} aria-label="Description" />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">Menu (un plat par ligne)</span>
+                          <textarea className="input" value={hostMenu} onChange={e => setHostMenu(e.target.value)} placeholder={'Entrée : salade de saison\nPlat : couscous\nDessert : cornes de gazelle'} rows={4} aria-label="Menu" />
+                        </label>
+                        <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Publication…' : 'Publier ma table'}</button>
+                      </fieldset>
+                      {!payouts?.active && <p className="muted small form-note">Le formulaire s’active une fois vos versements configurés.</p>}
+                    </form>
+                  </>
                 )}
               </div>
             </div>
@@ -1081,9 +1386,9 @@ export default function Shareat() {
           </section>
           <section className="section">
             <div className="steps">
-              {[['01', 'Vous fixez le prix', 'Indiquez le prix par couvert. Vos invités le règlent directement auprès de vous.'],
-                ['02', 'Vous choisissez la date', 'Une date, une heure, un nombre de couverts : vous gardez la main.'],
-                ['03', 'Vous échangez avant', 'Vos invités peuvent vous écrire pour poser leurs questions avant de réserver.']].map(([n, t, d]) => (
+              {[['01', 'Vous fixez votre prix', `Vous recevez le prix que vous fixez. Shareat ajoute ${Math.round(COMMISSION_RATE * 100)} % payés par l’invité, et les versements arrivent sur votre compte bancaire via Stripe.`],
+                ['02', 'Vous choisissez date et catégories', 'Une date, un nombre de couverts, et les catégories qui décrivent votre repas : repas étudiant, halal, casher, végétarien…'],
+                ['03', 'Vous échangez avant', 'Vos invités peuvent vous écrire avant de réserver. Votre adresse exacte n’est communiquée qu’après le paiement.']].map(([n, t, d]) => (
                 <div key={n} className="step">
                   <span className="step-num">{n}</span>
                   <h3>{t}</h3>
@@ -1095,6 +1400,7 @@ export default function Shareat() {
               <button className="btn btn-primary" onClick={() => { if (user) { setDashTab('host'); nav('dashboard') } else { setAuthMode('signup'); setShowAuth(true) } }}>
                 {user ? 'Proposer une table' : 'Créer mon compte hôte'}
               </button>
+              <p className="muted small form-note">En publiant, vous vous engagez à respecter les <Link className="inline-link" href="/conditions">conditions d’utilisation</Link> (hygiène, allergènes, déclaration de vos revenus).</p>
             </div>
           </section>
         </>
@@ -1124,6 +1430,10 @@ export default function Shareat() {
                 <Inp placeholder="Prénom et nom" value={fullName} onChange={setFullName} autoComplete="name" />
                 <Inp placeholder="Email" value={email} onChange={setEmail} type="email" autoComplete="email" />
                 <Inp placeholder="Mot de passe (8 caractères minimum)" value={password} onChange={setPassword} type="password" autoComplete="new-password" />
+                <label className="check">
+                  <input type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)} />
+                  <span>J’ai 18 ans ou plus et j’accepte les <Link className="inline-link" href="/conditions" target="_blank">conditions d’utilisation</Link> et la <Link className="inline-link" href="/confidentialite" target="_blank">politique de confidentialité</Link>.</span>
+                </label>
                 <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Création…' : 'Créer mon compte'}</button>
               </form>
             )}
@@ -1131,40 +1441,79 @@ export default function Shareat() {
         </div>
       )}
 
-      {/* ══ RÉSERVATION ══ */}
-      {showBooking && selectedMeal && (
-        <div className="backdrop" onClick={e => { if (e.target === e.currentTarget && !loading) setShowBooking(false) }}>
-          <div className="modal" role="dialog" aria-modal="true" aria-label="Réservation">
-            <button className="modal-close" onClick={() => { if (!loading) setShowBooking(false) }} aria-label="Fermer">×</button>
-            {bookingDone ? (
-              <div className="center">
-                <p className="eyebrow">C’est réservé</p>
+      {/* ══ RÉSULTAT DU PAIEMENT ══ */}
+      {bookingResult && (
+        <div className="backdrop" onClick={e => { if (e.target === e.currentTarget) setBookingResult(null) }}>
+          <div className="modal center" role="dialog" aria-modal="true" aria-label="Réservation">
+            <button className="modal-close" onClick={() => setBookingResult(null)} aria-label="Fermer">×</button>
+            {bookingResult.status === 'confirmed' ? (
+              <>
+                <p className="eyebrow">Paiement accepté</p>
                 <h2 className="title">À table !</h2>
-                <p className="muted">Votre place chez <strong>{selectedMeal.profiles?.full_name || 'votre hôte'}</strong> est réservée pour <strong>{bookedSeats} couvert{bookedSeats > 1 ? 's' : ''}</strong>, {fmtDate(selectedMeal.date, true)}.</p>
-                <p className="muted small">Le repas se règle directement auprès de l’hôte.</p>
+                <p className="muted">
+                  {bookingResult.meal
+                    ? <>Votre place chez <strong>{bookingResult.meal.profiles?.full_name || 'votre hôte'}</strong> est réservée pour <strong>{bookingResult.seats} couvert{bookingResult.seats > 1 ? 's' : ''}</strong>, {fmtDate(bookingResult.meal.date, true)} à {fmtTime(bookingResult.meal.time)}.</>
+                    : <>Votre réservation est confirmée.</>}
+                </p>
+                <p className="muted small">L’adresse exacte est visible sur la page du repas. Un reçu Stripe vous est envoyé par email.</p>
                 <div className="row-btns">
-                  <button className="btn btn-primary" onClick={() => { setShowBooking(false); setDashTab('bookings'); nav('dashboard') }}>Mes réservations</button>
-                  <button className="btn btn-ghost" onClick={() => { setShowBooking(false); openConversation({ id: selectedMeal.host_id, name: selectedMeal.profiles?.full_name || 'Hôte' }) }}>Écrire à l’hôte</button>
+                  {bookingResult.meal && <button className="btn btn-primary" onClick={() => { const m = bookingResult.meal!; setBookingResult(null); openMeal(m) }}>Voir le repas et l’adresse</button>}
+                  <button className="btn btn-ghost" onClick={() => { setBookingResult(null); setDashTab('bookings'); nav('dashboard') }}>Mes réservations</button>
                 </div>
-              </div>
+              </>
+            ) : bookingResult.status === 'refunded' ? (
+              <>
+                <p className="eyebrow">Table complète</p>
+                <h2 className="title">Désolé</h2>
+                <p className="muted">La dernière place a été prise pendant votre paiement. Vous êtes intégralement remboursé (sous 5 à 10 jours selon votre banque).</p>
+                <div className="row-btns"><button className="btn btn-primary" onClick={() => { setBookingResult(null); nav('explore') }}>Voir d’autres tables</button></div>
+              </>
             ) : (
-              <form onSubmit={e => { e.preventDefault(); createBooking() }}>
-                <h2 className="title">Confirmer la réservation</h2>
-                <div className="recap">
-                  <img src={mealPhoto(selectedMeal, 300)} alt="" />
-                  <div>
-                    <strong>{selectedMeal.title}</strong>
-                    <span className="muted small">Chez {selectedMeal.profiles?.full_name || 'votre hôte'} · {selectedMeal.city}</span>
-                    <span className="muted small">{fmtDate(selectedMeal.date, true)}{selectedMeal.time ? ` à ${fmtTime(selectedMeal.time)}` : ''}</span>
-                  </div>
-                </div>
-                <div className="book-line"><span>{eur(selectedMeal.price_per_seat)} × {guests} couvert{guests > 1 ? 's' : ''}</span><span>{eur(total)}</span></div>
-                <div className="book-line book-total"><span>À régler à l’hôte</span><span>{eur(total)}</span></div>
-                <p className="muted small">Aucun paiement n’est demandé en ligne.</p>
-                <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Réservation…' : 'Confirmer'}</button>
-              </form>
+              <>
+                <p className="eyebrow">Paiement en cours</p>
+                <h2 className="title">Presque fini</h2>
+                <p className="muted">Votre paiement est en cours de validation par votre banque. La réservation apparaîtra dans votre espace dès sa confirmation.</p>
+                <div className="row-btns"><button className="btn btn-primary" onClick={() => setBookingResult(null)}>D’accord</button></div>
+              </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ══ CONFIRMATION D'ANNULATION ══ */}
+      {confirmAction && (
+        <div className="backdrop" onClick={e => { if (e.target === e.currentTarget && !loading) setConfirmAction(null) }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Confirmer l’annulation">
+            <button className="modal-close" onClick={() => { if (!loading) setConfirmAction(null) }} aria-label="Fermer">×</button>
+            <h2 className="title">{confirmAction.kind === 'booking' ? 'Annuler la réservation ?' : 'Annuler la table ?'}</h2>
+            <p className="muted">
+              {confirmAction.kind === 'booking'
+                ? <>Votre réservation pour « {confirmAction.title} » sera annulée et intégralement remboursée.</>
+                : <>« {confirmAction.title} » sera retirée du site.{confirmAction.guests > 0 ? ` Les ${confirmAction.guests} invité(s) déjà inscrits seront intégralement remboursés.` : ''}</>}
+            </p>
+            <div className="row-btns">
+              <button className="btn btn-ghost" onClick={() => setConfirmAction(null)} disabled={loading}>Garder</button>
+              <button className="btn btn-danger" onClick={runConfirmAction} disabled={loading}>{loading ? 'Annulation…' : 'Confirmer l’annulation'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ AVIS ══ */}
+      {reviewFor && (
+        <div className="backdrop" onClick={e => { if (e.target === e.currentTarget && !loading) setReviewFor(null) }}>
+          <form className="modal" role="dialog" aria-modal="true" aria-label="Laisser un avis" onSubmit={e => { e.preventDefault(); submitReview() }}>
+            <button type="button" className="modal-close" onClick={() => setReviewFor(null)} aria-label="Fermer">×</button>
+            <h2 className="title">Votre avis</h2>
+            <p className="muted">{reviewFor.meals?.title} chez {reviewFor.meals?.profiles?.full_name || 'votre hôte'}</p>
+            <div className="star-picker" role="radiogroup" aria-label="Note">
+              {[1, 2, 3, 4, 5].map(n => (
+                <button type="button" key={n} role="radio" aria-checked={reviewRating === n} aria-label={`${n} sur 5`} className={n <= reviewRating ? 'on' : ''} onClick={() => setReviewRating(n)}>★</button>
+              ))}
+            </div>
+            <textarea className="input" rows={4} value={reviewComment} onChange={e => setReviewComment(e.target.value)} placeholder="Racontez votre soirée…" maxLength={1000} aria-label="Commentaire" />
+            <button type="submit" className="btn btn-primary btn-block" disabled={loading}>{loading ? 'Envoi…' : 'Publier mon avis'}</button>
+          </form>
         </div>
       )}
 
@@ -1173,7 +1522,12 @@ export default function Shareat() {
       <footer className="footer">
         <span className="logo logo-static">Shareat</span>
         <span>Partagez une table, découvrez une culture.</span>
-        <span className="muted small">© 2026 Shareat · Photos : Unsplash</span>
+        <nav className="footer-links" aria-label="Informations légales">
+          <Link href="/mentions-legales">Mentions légales</Link>
+          <Link href="/conditions">Conditions d’utilisation et de vente</Link>
+          <Link href="/confidentialite">Confidentialité</Link>
+        </nav>
+        <span className="muted small">© 2026 Shareat · Paiements sécurisés par Stripe · Photos : Unsplash · Carte : OpenStreetMap</span>
       </footer>
     </div>
   )

@@ -343,3 +343,88 @@ select.input option { background: var(--surface-solid); }
   .two-col { grid-template-columns: 1fr; gap: 0; }
   .logo { font-size: 1.45rem; }
 }
+
+/* ═══════════ Ajouts : catégories, carte, paiement, avis ═══════════ */
+.filters { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.6rem; }
+.chip-soft { border-style: dashed; }
+.chip-soft.on { border-style: solid; }
+.chips-wrap { flex-wrap: wrap; overflow: visible; margin-bottom: 0; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.7rem; }
+.tag-row-lg { margin: 0 0 1.6rem; }
+.tag { font-size: 0.72rem; color: var(--powder); border: 1px solid var(--line-strong); border-radius: 999px; padding: 0.18rem 0.6rem; }
+
+.map { width: 100%; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--surface-solid); margin-bottom: 0.8rem; z-index: 0; }
+.map .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(0.85) contrast(0.9) saturate(0.22); }
+.map .leaflet-control-attribution { background: rgba(6, 8, 13, 0.75); color: var(--muted); font-size: 0.68rem; }
+.map .leaflet-control-attribution a { color: var(--soft); }
+.map .leaflet-bar a { background: var(--surface-solid); color: var(--text); border-color: var(--line); }
+.map-pin-wrap { background: none; border: 0; }
+.map-pin {
+  display: inline-block; transform: translate(-50%, -100%); white-space: nowrap; cursor: pointer;
+  background: var(--sky); color: var(--bg); font: 600 0.78rem var(--font-body);
+  padding: 0.3rem 0.65rem; border-radius: 999px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.map-pin:hover { background: var(--powder); }
+.map-note { margin: 0 0 1.6rem; }
+.detail-map { margin: 1rem 0 2.4rem; }
+.address { font-size: 1.05rem; margin: 0 0 0.4rem; }
+
+.field-hint { display: block; font-size: 0.8rem; color: var(--muted); margin-top: 0.45rem; line-height: 1.5; }
+.ok-hint { color: var(--ok); }
+.address-row { display: flex; gap: 0.6rem; }
+.address-row .input { flex: 1; min-width: 0; }
+.address-matches { display: flex; flex-direction: column; margin-top: 0.4rem; border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden; }
+.address-match { text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--text); padding: 0.7rem 1rem; cursor: pointer; font: inherit; font-size: 0.9rem; }
+.address-match:last-child { border-bottom: 0; }
+.address-match:hover { background: rgba(167, 199, 231, 0.08); }
+.fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.fieldset:disabled { opacity: 0.45; }
+.form-note { margin-top: 0.9rem; }
+.inline-link { color: var(--sky); text-decoration: underline; text-underline-offset: 3px; }
+
+.payout-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; padding: 1.3rem 1.4rem; border: 1px solid var(--line-strong); border-radius: 18px; margin-bottom: 1.4rem; }
+.payout-card p { margin: 0; color: var(--soft); line-height: 1.6; max-width: 36rem; }
+.payout-card.ok { border-color: rgba(169, 216, 192, 0.45); }
+.payout-title { margin: 0 0 0.4rem !important; }
+
+.row-actions { display: flex; flex-wrap: wrap; gap: 0.2rem 1.1rem; margin-top: 0.2rem; }
+.row-actions .link { padding: 0; font-size: 0.85rem; }
+.danger-link { color: var(--danger) !important; }
+.booking { cursor: default; }
+.booking img { cursor: pointer; }
+.btn-danger { background: var(--danger); color: var(--bg); }
+.btn-danger:hover:not(:disabled) { background: #f3c4c4; }
+
+.check { display: flex; gap: 0.7rem; align-items: flex-start; font-size: 0.85rem; color: var(--soft); line-height: 1.5; margin: 0.2rem 0 1rem; cursor: pointer; }
+.check input { margin-top: 0.25rem; accent-color: var(--sky); width: 1rem; height: 1rem; flex-shrink: 0; }
+
+.star-picker { display: flex; gap: 0.3rem; margin: 0.4rem 0 1rem; }
+.star-picker button { background: none; border: 0; font-size: 2rem; line-height: 1; color: var(--line-strong); cursor: pointer; padding: 0.1rem; }
+.star-picker button.on { color: var(--sky); }
+.modal.center { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.4rem; }
+.modal .title { margin-bottom: 0.6rem; }
+
+.footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem 1.4rem; margin: 0.4rem 0; }
+.footer-links a { color: var(--soft); font-size: 0.85rem; }
+.footer-links a:hover { color: var(--sky); }
+
+@media (max-width: 640px) {
+  .address-row { flex-direction: column; }
+}
+
+/* ── Pages légales ── */
+.legal { max-width: 820px; margin: 0 auto; padding: clamp(2.5rem, 6vw, 4.5rem) clamp(1rem, 5vw, 2rem); }
+.legal h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(2.2rem, 5vw, 3.2rem); line-height: 1.1; margin: 0 0 0.6rem; }
+.legal h2 { font-family: var(--font-display); font-weight: 400; font-size: 1.7rem; margin: 2.6rem 0 0.8rem; color: var(--powder); }
+.legal h3 { font-size: 1rem; font-weight: 600; margin: 1.6rem 0 0.5rem; }
+.legal p, .legal li { color: var(--soft); line-height: 1.8; }
+.legal p { margin: 0 0 0.9rem; }
+.legal ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+.legal a { color: var(--sky); text-decoration: underline; text-underline-offset: 3px; }
+.legal strong { color: var(--text); font-weight: 600; }
+.legal table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0.6rem 0 1.4rem; }
+.legal th, .legal td { text-align: left; padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--line); color: var(--soft); vertical-align: top; }
+.legal th { color: var(--text); font-weight: 600; }
+.legal .table-wrap { overflow-x: auto; }
+.legal-back { display: inline-block; margin-bottom: 2rem; color: var(--sky); font-size: 0.9rem; }
+.legal-updated { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem !important; }
