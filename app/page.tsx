@@ -72,15 +72,16 @@ type DashTab = 'overview' | 'bookings' | 'favorites' | 'profile' | 'host'
 // ═════════════════════════════ HELPERS ═════════════════════════════
 
 const s = {
-  terra: '#C4622D', sage: '#6B8F6B', cream: '#FAF6F0',
-  dark: '#2C2416', mid: '#7A6652', border: '#EDE8E0',
+  terra: '#1E5AA8', sage: '#6E7D2C', cream: '#FBF6EC',
+  dark: '#1B2A3A', mid: '#6B6352', border: '#EADFCB',
+  ocre: '#E0A43A', olive: '#8A9A3B',
 }
 
 const SERVICE_FEE = 2
-const PROMO_CODE = 'HOMEAT10'
+const PROMO_CODE = 'SHAREAT10'
 const PROMO_RATE = 0.1
 
-const avatarColors = ['#C4622D', '#C44444', '#2d8659', '#D4851A', '#9C4400', '#8B7355', '#2E6DA4', '#B34700']
+const avatarColors = ['#1E5AA8', '#2F7FC1', '#8A9A3B', '#E0A43A', '#C2593A', '#0F6E6E', '#6E7D2C', '#B5832A']
 const getColor = (name?: string | null) => avatarColors[(name?.charCodeAt(0) || 0) % avatarColors.length]
 
 const cuisineEmojis: Record<string, string> = {
@@ -313,7 +314,7 @@ const Grid = ({ data, favIds, loading, emptyTitle, emptyAction, onOpen, onToggle
 
 // ═════════════════════════════ PAGE ═════════════════════════════
 
-export default function HomEat() {
+export default function Shareat() {
   const [page, setPage] = useState<Page>('home')
   const [prevPage, setPrevPage] = useState<Page>('home')
   const [meals, setMeals] = useState<Meal[]>([])
@@ -741,12 +742,12 @@ export default function HomEat() {
   )
 
   return (
-    <div style={{ fontFamily: "'Segoe UI', sans-serif", background: s.cream, minHeight: '100vh', color: s.dark, display: 'flex', flexDirection: 'column', width: '100%' }}>
+    <div style={{ fontFamily: 'var(--font-geist-sans), system-ui, sans-serif', background: s.cream, minHeight: '100vh', color: s.dark, display: 'flex', flexDirection: 'column', width: '100%' }}>
 
       {/* ── NAV ── */}
       <nav className="he-nav" style={{ background: '#fff', borderBottom: `1px solid ${s.border}`, position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-        <div onClick={() => nav('home')} style={{ fontSize: '1.6rem', fontWeight: 900, color: s.terra, cursor: 'pointer', letterSpacing: -1 }}>
-          Hom<span style={{ color: s.sage }}>Eat</span>
+        <div onClick={() => nav('home')} style={{ fontSize: '1.65rem', fontWeight: 700, color: s.terra, cursor: 'pointer', letterSpacing: -0.5, fontFamily: 'var(--font-fraunces), Georgia, serif' }}>
+          Shar<span style={{ color: s.ocre }}>eat</span>
         </div>
         <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {navLink('explore', 'Explorer')}
@@ -775,9 +776,9 @@ export default function HomEat() {
       {/* ══ HOME ══ */}
       {page === 'home' && (
         <div>
-          <div style={{ background: 'linear-gradient(135deg, #2C2416 0%, #5C3A1E 50%, #C4622D 100%)', padding: '5rem 1.25rem 4rem', textAlign: 'center', color: '#fff' }}>
+          <div style={{ background: 'linear-gradient(135deg, #0F2E57 0%, #1E5AA8 55%, #2F8FC9 100%)', padding: '5rem 1.25rem 4rem', textAlign: 'center', color: '#fff' }}>
             <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 999, padding: '0.3rem 1rem', fontSize: '0.8rem', marginBottom: '1.5rem' }}>🌍 Partagez une table, découvrez une culture</div>
-            <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 3rem)', fontWeight: 900, lineHeight: 1.1, marginBottom: '1rem' }}>Dînez chez l&apos;<span style={{ color: '#E8845A' }}>habitant</span>,<br />découvrez une culture</h1>
+            <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 3rem)', fontWeight: 900, lineHeight: 1.1, marginBottom: '1rem' }}>Dînez chez l&apos;<span style={{ color: s.ocre }}>habitant</span>,<br />découvrez une culture</h1>
             <p style={{ fontSize: '1rem', opacity: 0.85, maxWidth: 500, margin: '0 auto 2.5rem' }}>Trouvez un hôte qui partage sa table, sa cuisine et son histoire. Une expérience unique à chaque repas.</p>
             <form onSubmit={e => { e.preventDefault(); setAppliedCity(searchCity); nav('explore') }}
               style={{ background: '#fff', color: s.dark, borderRadius: 16, padding: '1.2rem 1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', maxWidth: 680, margin: '0 auto', boxShadow: '0 8px 40px rgba(0,0,0,0.25)', flexWrap: 'wrap', textAlign: 'left' }}>
@@ -814,7 +815,7 @@ export default function HomEat() {
             <div style={{ display: 'flex', gap: '0.8rem', overflowX: 'auto', paddingBottom: '0.5rem', marginBottom: '2rem' }}>
               {[['🍽️', 'Tout', 'all'], ...Object.entries(cuisineEmojis).map(([k, v]) => [v, k, k])].map(([icon, label, val]) => (
                 <div key={val} onClick={() => setFilterCuisine(val)}
-                  style={{ flexShrink: 0, background: filterCuisine === val ? '#FEF3ED' : '#fff', border: `2px solid ${filterCuisine === val ? s.terra : s.border}`, borderRadius: 12, padding: '0.6rem 1rem', cursor: 'pointer', textAlign: 'center', minWidth: 80 }}>
+                  style={{ flexShrink: 0, background: filterCuisine === val ? '#E8F0FA' : '#fff', border: `2px solid ${filterCuisine === val ? s.terra : s.border}`, borderRadius: 12, padding: '0.6rem 1rem', cursor: 'pointer', textAlign: 'center', minWidth: 80 }}>
                   <div style={{ fontSize: '1.4rem' }}>{icon}</div>
                   <div style={{ fontSize: '0.72rem', fontWeight: 600 }}>{label}</div>
                 </div>
@@ -831,7 +832,7 @@ export default function HomEat() {
             <div style={{ background: '#fff', borderRadius: 20, padding: '2.5rem 1.5rem', maxWidth: 1060, margin: '0 auto' }}>
               <h2 style={{ fontWeight: 800, textAlign: 'center', marginBottom: '2rem' }}>Comment ça marche ?</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1.5rem' }}>
-                {[['🔍', '#FEF3ED', 'Cherchez', 'Filtrez par ville, cuisine, budget.'], ['💬', '#E8F5E9', 'Messagez', 'Discutez avec l\'hôte avant.'], ['💳', '#EBF8FF', 'Payez', 'Paiement 100% sécurisé.'], ['🍴', '#FFF8E1', 'Dînez', 'Vivez une expérience unique.'], ['⭐', '#F0E8FF', 'Évaluez', 'Laissez un avis après.']].map(([icon, bg, title, desc]) => (
+                {[['🔍', '#E8F0FA', 'Cherchez', 'Filtrez par ville, cuisine, budget.'], ['💬', '#E8F5E9', 'Messagez', 'Discutez avec l\'hôte avant.'], ['💳', '#EBF8FF', 'Payez', 'Paiement 100% sécurisé.'], ['🍴', '#FFF8E1', 'Dînez', 'Vivez une expérience unique.'], ['⭐', '#F0E8FF', 'Évaluez', 'Laissez un avis après.']].map(([icon, bg, title, desc]) => (
                   <div key={title} style={{ textAlign: 'center' }}>
                     <div style={{ width: 56, height: 56, borderRadius: '50%', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', margin: '0 auto 0.8rem' }}>{icon}</div>
                     <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.3rem' }}>{title}</h3>
@@ -843,9 +844,9 @@ export default function HomEat() {
           </div>
 
           <div className="he-section" style={{ maxWidth: 1100, margin: '0 auto' }}>
-            <div style={{ background: 'linear-gradient(135deg, #6B8F6B, #3D6B45)', borderRadius: 20, padding: '2.5rem', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
-              <div><h2 style={{ fontWeight: 900, marginBottom: '0.5rem' }}>Devenez hôte HomEat</h2><p style={{ opacity: 0.9, maxWidth: 400, fontSize: '0.9rem' }}>Partagez votre passion culinaire et rencontrez des gens du monde entier.</p></div>
-              <button onClick={() => nav('become')} style={{ background: '#fff', color: '#6B8F6B', border: 'none', borderRadius: 999, padding: '0.8rem 1.8rem', fontWeight: 700, cursor: 'pointer' }}>Commencer →</button>
+            <div style={{ background: 'linear-gradient(135deg, #8A9A3B, #55621F)', borderRadius: 20, padding: '2.5rem', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
+              <div><h2 style={{ fontWeight: 900, marginBottom: '0.5rem' }}>Devenez hôte Shareat</h2><p style={{ opacity: 0.9, maxWidth: 400, fontSize: '0.9rem' }}>Partagez votre passion culinaire et rencontrez des gens du monde entier.</p></div>
+              <button onClick={() => nav('become')} style={{ background: '#fff', color: s.sage, border: 'none', borderRadius: 999, padding: '0.8rem 1.8rem', fontWeight: 700, cursor: 'pointer' }}>Commencer →</button>
             </div>
           </div>
         </div>
@@ -1043,7 +1044,7 @@ export default function HomEat() {
                     {(profile?.full_name || user.email || '?').charAt(0).toUpperCase()}
                   </div>
                   <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{profile?.full_name || user.email}</div>
-                  <div style={{ fontSize: '0.75rem', color: s.mid }}>Membre HomEat</div>
+                  <div style={{ fontSize: '0.75rem', color: s.mid }}>Membre Shareat</div>
                 </div>
                 {([['overview', '📊', 'Vue d\'ensemble'], ['bookings', '🍽️', 'Réservations'], ['favorites', '❤️', 'Favoris'], ['profile', '👤', 'Mon profil'], ['host', '🏠', 'Espace hôte']] as [DashTab, string, string][]).map(([id, icon, label]) => (
                   <div key={id} onClick={() => setDashTab(id)}
@@ -1162,8 +1163,8 @@ export default function HomEat() {
       {page === 'map' && (
         <div className="he-section" style={{ maxWidth: 1100, margin: '0 auto' }}>
           <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>🗺️ Carte des repas</h2>
-          <div style={{ borderRadius: 16, overflow: 'hidden', height: 380, background: 'linear-gradient(180deg, #c8e6c9, #a5d6a7)', position: 'relative', marginBottom: '1.5rem' }}>
-            <div style={{ position: 'absolute', inset: 0, opacity: 0.4, backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 39px, #81c784 39px, #81c784 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, #81c784 39px, #81c784 40px)' }} />
+          <div style={{ borderRadius: 16, overflow: 'hidden', height: 380, background: 'linear-gradient(180deg, #CFE3F2 0%, #E4EEF3 55%, #F3E6CC 100%)', position: 'relative', marginBottom: '1.5rem' }}>
+            <div style={{ position: 'absolute', inset: 0, opacity: 0.4, backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 39px, #B9D3E8 39px, #B9D3E8 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, #B9D3E8 39px, #B9D3E8 40px)' }} />
             {!mealsLoading && filtered.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.5rem' }}>
                 <div style={{ fontSize: '3rem' }}>🗺️</div>
@@ -1173,7 +1174,7 @@ export default function HomEat() {
             {filtered.map((m, i) => (
               <div key={m.id} onClick={() => openMeal(m)} title={`${m.title} — ${m.city}`}
                 style={{ position: 'absolute', left: `${12 + (i * 17) % 76}%`, top: `${20 + (i * 23) % 65}%`, transform: 'translate(-50%, -100%)', cursor: 'pointer', zIndex: 10 }}>
-                <div style={{ background: s.terra, color: '#fff', borderRadius: 999, padding: '0.2rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap', boxShadow: '0 3px 12px rgba(196,98,45,0.4)' }}>
+                <div style={{ background: s.terra, color: '#fff', borderRadius: 999, padding: '0.2rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap', boxShadow: '0 3px 12px rgba(30,90,168,0.4)' }}>
                   {m.photo_url || '🍽️'} {eur(m.price_per_seat)}
                 </div>
                 <div style={{ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: `8px solid ${s.terra}`, margin: '0 auto' }} />
@@ -1188,13 +1189,13 @@ export default function HomEat() {
       {/* ══ BECOME ══ */}
       {page === 'become' && (
         <div>
-          <div style={{ background: 'linear-gradient(135deg, #6B8F6B, #3D6B45)', color: '#fff', padding: '4rem 1.25rem', textAlign: 'center' }}>
+          <div style={{ background: 'linear-gradient(135deg, #8A9A3B, #55621F)', color: '#fff', padding: '4rem 1.25rem', textAlign: 'center' }}>
             <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '1rem' }}>🏠 Partagez votre table</h1>
             <p style={{ opacity: 0.9, maxWidth: 480, margin: '0 auto 2rem', fontSize: '1rem' }}>Rencontrez des gens du monde entier et gagnez un revenu complémentaire.</p>
           </div>
           <div className="he-section" style={{ maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-              {[['💶', '#FEF3ED', 'Revenus complémentaires', 'Gagnez selon vos disponibilités.'], ['🌍', '#E8F5E9', 'Rencontres mondiales', 'Accueillez des voyageurs curieux.'], ['🛡️', '#EBF8FF', 'Sécurité garantie', 'Profils vérifiés, paiements sécurisés.']].map(([icon, bg, title, desc]) => (
+              {[['💶', '#E8F0FA', 'Revenus complémentaires', 'Gagnez selon vos disponibilités.'], ['🌍', '#E8F5E9', 'Rencontres mondiales', 'Accueillez des voyageurs curieux.'], ['🛡️', '#EBF8FF', 'Sécurité garantie', 'Profils vérifiés, paiements sécurisés.']].map(([icon, bg, title, desc]) => (
                 <div key={title} style={{ textAlign: 'center' }}>
                   <div style={{ width: 60, height: 60, borderRadius: '50%', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', margin: '0 auto 1rem' }}>{icon}</div>
                   <h3 style={{ fontWeight: 700, marginBottom: '0.4rem' }}>{title}</h3>
@@ -1219,7 +1220,7 @@ export default function HomEat() {
           <div role="dialog" aria-modal="true" style={{ background: '#fff', borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
             <button onClick={() => setShowAuth(false)} aria-label="Fermer" style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: s.mid }}>✕</button>
             <div style={{ textAlign: 'center', fontSize: '2.5rem', marginBottom: '0.5rem' }}>🍴</div>
-            <h2 style={{ textAlign: 'center', fontWeight: 800, marginBottom: '0.3rem' }}>Bienvenue sur HomEat</h2>
+            <h2 style={{ textAlign: 'center', fontWeight: 800, marginBottom: '0.3rem' }}>Bienvenue sur Shareat</h2>
             <p style={{ textAlign: 'center', color: s.mid, fontSize: '0.85rem', marginBottom: '1.3rem' }}>La table qui unit les cultures</p>
             <div style={{ display: 'flex', border: `1.5px solid ${s.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: '1.5rem' }}>
               {(['login', 'signup'] as const).map(t => (
@@ -1320,8 +1321,8 @@ export default function HomEat() {
       )}
 
       <footer style={{ background: s.dark, color: 'rgba(255,255,255,0.6)', textAlign: 'center', padding: '2rem', fontSize: '0.82rem', marginTop: '3rem' }}>
-        <strong style={{ color: '#fff' }}>HomEat</strong> — Partagez une table, découvrez le monde 🌍<br />
-        <span style={{ fontSize: '0.75rem' }}>© 2026 HomEat · CGU · Confidentialité · Aide</span>
+        <strong style={{ color: '#fff' }}>Shareat</strong> — Partagez une table, découvrez le monde 🌍<br />
+        <span style={{ fontSize: '0.75rem' }}>© 2026 Shareat · CGU · Confidentialité · Aide</span>
       </footer>
     </div>
   )
