@@ -3,6 +3,11 @@
 
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import Header from './components/site/Header'
+import Footer from './components/site/Footer'
+import Icon from './components/site/Icons'
+import { Counter, Tile } from './components/site/Interactive'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, supabaseConfigured } from '../lib/supabase'
 import { ALLERGENS, CATEGORIES, CUISINES, COMMISSION_RATE, FREE_CANCELLATION_HOURS, STUDENT_MAX_PRICE, TRANSFER_DELAY_HOURS, displayPrice, parisDateTime, todayParis } from '../lib/shared'
@@ -337,6 +342,7 @@ const Grid = ({ data, favIds, loading, empty, onOpen, onToggleFav }: GridProps) 
 // ═════════════════════════════ PAGE ═════════════════════════════
 
 export default function Shareat() {
+  const router = useRouter()
   const [page, setPage] = useState<Page>('home')
   const [prevPage, setPrevPage] = useState<Page>('home')
   const [meals, setMeals] = useState<Meal[]>([])
@@ -444,6 +450,12 @@ export default function Shareat() {
   }
 
   // ── EFFETS ──
+
+  // Liens « /?vue=explorer » ou « /?vue=carte » venant des autres pages.
+  useEffect(() => {
+    const vue = new URLSearchParams(window.location.search).get('vue')
+    if (vue === 'explorer' || vue === 'carte') queueMicrotask(() => setPage(vue === 'carte' ? 'map' : 'explore'))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -888,7 +900,7 @@ export default function Shareat() {
     ? <p>{mealsError}</p>
     : meals.length > 0
       ? <><p>Aucune table ne correspond à votre recherche.</p><button className="btn btn-ghost" onClick={resetFilters}>Réinitialiser les filtres</button></>
-      : <><p className="empty-title">Les premières tables arrivent.</p><p>Shareat vient d’ouvrir : proposez la vôtre et accueillez vos premiers invités.</p><button className="btn btn-primary" onClick={() => nav('become')}>Proposer une table</button></>
+      : <><p className="empty-title">Les premières tables arrivent.</p><p>Shareat vient d’ouvrir : proposez la vôtre et accueillez vos premiers invités.</p><button className="btn btn-primary" onClick={() => router.push('/devenir-hote')}>Proposer une table</button></>
 
   const filters = (
     <div className="filters">
@@ -914,9 +926,6 @@ export default function Shareat() {
     </div>
   )
 
-  const navLink = (p: Page, label: string) => (
-    <button className={`nav-link${page === p ? ' active' : ''}`} onClick={() => nav(p)}>{label}</button>
-  )
 
   const dashTabs: [DashTab, string][] = [['overview', 'Vue d’ensemble'], ['bookings', 'Réservations'], ['favorites', 'Favoris'], ['profile', 'Mon profil'], ['host', 'Espace hôte']]
 
@@ -926,26 +935,19 @@ export default function Shareat() {
   return (
     <div className="shell">
 
-      <header className="nav">
-        <button className="logo" onClick={() => nav('home')} aria-label="Shareat, accueil">Shareat</button>
-        <nav className="nav-links">
-          {navLink('explore', 'Explorer')}
-          {navLink('map', 'Carte')}
-          {navLink('messages', 'Messages')}
-          {navLink('become', 'Devenir hôte')}
-          {user ? (
+      <Header
+        current={page === 'home' ? '/' : page === 'explore' ? '/?vue=explorer' : page === 'map' ? '/?vue=carte' : `/#${page}`}
+        onNavigate={href => { if (href === '/') nav('home'); else if (href === '/?vue=explorer') nav('explore'); else if (href === '/?vue=carte') nav('map') }}
+        account={user ? (
+          <>
+            <button className="btn btn-ghost btn-sm" onClick={() => nav('messages')}>Messages</button>
             <button className="nav-user" onClick={() => nav('dashboard')} title="Mon espace">
               <span className="nav-user-name">{profile?.full_name?.split(' ')[0] || user.email?.split('@')[0]}</span>
               <Avatar name={profile?.full_name || user.email} size={34} />
             </button>
-          ) : (
-            <>
-              <button className="btn btn-ghost btn-sm" onClick={() => { setAuthMode('login'); setShowAuth(true) }}>Connexion</button>
-              <button className="btn btn-primary btn-sm" onClick={() => { setAuthMode('signup'); setShowAuth(true) }}>S’inscrire</button>
-            </>
-          )}
-        </nav>
-      </header>
+          </>
+        ) : undefined}
+      />
 
       <main className="main">
 
@@ -976,36 +978,47 @@ export default function Shareat() {
           </section>
 
           <section className="section">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">À venir</p>
-                <h2 className="title">Prochaines tables</h2>
-              </div>
-              {meals.length > 0 && <button className="link" onClick={() => nav('explore')}>Tout voir →</button>}
+            <p className="eyebrow reveal">Par où commencer ?</p>
+            <h2 className="title reveal">Que voulez-vous faire ?</h2>
+            <div className="tiles">
+              <button className="tile glass reveal" onClick={() => nav('explore')}>
+                <span className="tile-icon"><Icon name="search" size={28} /></span>
+                <h3>Je veux manger</h3>
+                <p>Je cherche un repas fait maison près de chez moi et je réserve ma place.</p>
+                <span className="tile-go">Voir les repas <Icon name="arrow" size={18} /></span>
+              </button>
+              <Tile href="/devenir-hote" icon="plate" title="Je veux cuisiner" text="Je reçois des invités chez moi, je fixe mon prix et je suis payé après le repas." go="Devenir hôte" delay={0.08} />
+              <Tile href="/comment-ca-marche" icon="sparkle" title="Je veux comprendre" text="Comment ça marche, combien ça coûte, comment annuler : tout est expliqué simplement." go="Mode d’emploi" delay={0.16} />
             </div>
-            {meals.length > 0 && (
-              <div className="chips" role="group" aria-label="Catégories">
-                {CATEGORIES.map(t => (
-                  <button key={t} aria-pressed={filterTags.includes(t)} className={`chip chip-soft${filterTags.includes(t) ? ' on' : ''}`} onClick={() => toggleFilterTag(t)}>{t}</button>
-                ))}
-              </div>
-            )}
-            <Grid data={filtered.slice(0, 8)} loading={mealsLoading} empty={emptyState} {...gridProps} />
           </section>
 
+
           <section className="section">
-            <p className="eyebrow">Comment ça marche</p>
-            <h2 className="title">Trois étapes, une table</h2>
-            <div className="steps">
-              {[['01', 'Cherchez', 'Filtrez les tables par ville, cuisine ou catégorie (repas étudiant, halal, casher, végétarien…) ou parcourez la carte.'],
-                ['02', 'Échangez', 'Posez vos questions à l’hôte par message avant de réserver.'],
-                ['03', 'Réservez et payez', 'Payez en ligne de façon sécurisée avec Stripe. L’adresse exacte vous est communiquée après la réservation.']].map(([n, t, d]) => (
-                <div key={n} className="step">
-                  <span className="step-num">{n}</span>
-                  <h3>{t}</h3>
+            <p className="eyebrow reveal">Les règles en chiffres</p>
+            <h2 className="title reveal">Simple et sans surprise</h2>
+            <div className="cards">
+              {([[Math.round(COMMISSION_RATE * 100), ' %', 'de commission prise par Shareat sur chaque place, pour le paiement sécurisé et le service client (taux provisoire).'], [FREE_CANCELLATION_HOURS, ' h', 'avant le repas : jusque-là, l’annulation est gratuite et remboursée en entier.'], [14, '', 'allergènes majeurs que chaque hôte doit déclarer pour chaque repas.'], [STUDENT_MAX_PRICE, ' €', 'maximum pour un repas étudiant. Bien manger, petit budget.']] as [number, string, string][]).map(([n, suf, d], i) => (
+                <div key={d} className="info-card glass reveal" style={{ ['--d' as string]: `${i * 0.06}s` }}>
+                  <Counter to={n} suffix={suf} />
                   <p>{d}</p>
                 </div>
               ))}
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="split">
+              <div className="reveal">
+                <p className="eyebrow">Confiance</p>
+                <h2 className="title">Vous êtes protégé</h2>
+                <ul className="checklist">
+                  {[['card', 'Paiement sécurisé par Stripe', 'Shareat ne voit jamais votre carte.'], ['map', 'Adresse cachée', 'Donnée seulement après la réservation.'], ['star', 'Avis vérifiés', 'Seuls les vrais invités peuvent noter.'], ['flag', 'Une équipe qui répond', 'Sous 24 h, tous les jours.']].map(([ic, t, d]) => (
+                    <li key={t} className="done"><span className="tick"><Icon name={ic} size={15} /></span><div><strong>{t}</strong><small>{d}</small></div></li>
+                  ))}
+                </ul>
+                <Link className="btn btn-ghost" href="/confiance-securite" style={{ marginTop: '1.2rem' }}>Tout savoir sur la sécurité <Icon name="arrow" size={18} /></Link>
+              </div>
+              <img className="reveal" style={{ ['--d' as string]: '0.1s' }} src={unsplash('1414235077428-338989a2e8c0', 1000)} alt="Une table dressée pour un repas partagé" />
             </div>
           </section>
 
@@ -1016,7 +1029,7 @@ export default function Shareat() {
                 <p className="eyebrow">Hôtes</p>
                 <h2 className="title">Ouvrez votre table</h2>
                 <p>Fixez votre prix, vos dates et vos catégories. Vos gains vous sont virés automatiquement après chaque repas.</p>
-                <button className="btn btn-primary" onClick={() => nav('become')}>Devenir hôte</button>
+                <button className="btn btn-primary" onClick={() => router.push('/devenir-hote')}>Devenir hôte</button>
               </div>
             </div>
           </section>
@@ -1310,7 +1323,7 @@ export default function Shareat() {
                       <div>
                         <p className="subtitle payout-title">Versements</p>
                         {payouts?.active
-                          ? <p>Vos versements sont activés. Vous recevez votre prix pour chaque couvert, viré {TRANSFER_DELAY_HOURS} h après le repas ; Shareat ajoute {Math.round(COMMISSION_RATE * 100)} % payés par l’invité.</p>
+                          ? <p>Vos versements sont activés. Vos gains sont virés {TRANSFER_DELAY_HOURS} h après chaque repas ; Shareat prend une commission de {Math.round(COMMISSION_RATE * 100)} % (taux provisoire).</p>
                           : <p>Pour publier une table et être payé, reliez un compte de versement Stripe (identité et IBAN). Cela prend environ 5 minutes.</p>}
                       </div>
                       {payouts?.active
@@ -1465,7 +1478,7 @@ export default function Shareat() {
           </section>
           <section className="section">
             <div className="steps">
-              {[['01', 'Vous fixez votre prix', `Vous recevez le prix que vous fixez, viré ${TRANSFER_DELAY_HOURS} h après le repas sur votre compte bancaire via Stripe. Shareat ajoute ${Math.round(COMMISSION_RATE * 100)} % payés par l’invité.`],
+              {[['01', 'Vous fixez votre prix', `Vos gains sont virés ${TRANSFER_DELAY_HOURS} h après le repas sur votre compte bancaire via Stripe. Shareat prend une commission de ${Math.round(COMMISSION_RATE * 100)} % (taux provisoire).`],
                 ['02', 'Vous choisissez date et catégories', 'Une date, un nombre de couverts, et les catégories qui décrivent votre repas : repas étudiant, halal, casher, végétarien…'],
                 ['03', 'Vous échangez avant', 'Vos invités peuvent vous écrire avant de réserver. Votre adresse exacte n’est communiquée qu’après le paiement.']].map(([n, t, d]) => (
                 <div key={n} className="step">
@@ -1528,7 +1541,7 @@ export default function Shareat() {
             {bookingResult.status === 'confirmed' ? (
               <>
                 <p className="eyebrow">Paiement accepté</p>
-                <h2 className="title">À table !</h2>
+                <h2 className="title">À table !</h2>
                 <p className="muted">
                   {bookingResult.meal
                     ? <>Votre place chez <strong>{bookingResult.meal.profiles?.full_name || 'votre hôte'}</strong> est réservée pour <strong>{bookingResult.seats} couvert{bookingResult.seats > 1 ? 's' : ''}</strong>, {fmtDate(bookingResult.meal.date, true)} à {fmtTime(bookingResult.meal.time)}.</>
@@ -1564,7 +1577,7 @@ export default function Shareat() {
         <div className="backdrop" onClick={e => { if (e.target === e.currentTarget && !loading) setConfirmAction(null) }}>
           <div className="modal" role="dialog" aria-modal="true" aria-label="Confirmer l’annulation">
             <button className="modal-close" onClick={() => { if (!loading) setConfirmAction(null) }} aria-label="Fermer">×</button>
-            <h2 className="title">{confirmAction.kind === 'booking' ? 'Annuler la réservation ?' : 'Annuler la table ?'}</h2>
+            <h2 className="title">{confirmAction.kind === 'booking' ? 'Annuler la réservation ?' : 'Annuler la table ?'}</h2>
             <p className="muted">
               {confirmAction.kind === 'booking'
                 ? <>Votre réservation pour « {confirmAction.title} » sera annulée et intégralement remboursée.</>
@@ -1598,16 +1611,7 @@ export default function Shareat() {
 
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
 
-      <footer className="footer">
-        <span className="logo logo-static">Shareat</span>
-        <span>Partagez une table, découvrez une culture.</span>
-        <nav className="footer-links" aria-label="Informations légales">
-          <Link href="/mentions-legales">Mentions légales</Link>
-          <Link href="/conditions">Conditions d’utilisation et de vente</Link>
-          <Link href="/confidentialite">Confidentialité</Link>
-        </nav>
-        <span className="muted small">© 2026 Shareat · Paiements sécurisés par Stripe · Photos : Unsplash · Carte : OpenStreetMap</span>
-      </footer>
+      <Footer />
     </div>
   )
 }

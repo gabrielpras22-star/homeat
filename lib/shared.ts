@@ -1,7 +1,13 @@
 // Constantes et calculs partagés entre le navigateur et le serveur.
 
-/** Commission Shareat : 10 % ajoutés au prix fixé par l'hôte. */
+/**
+ * Commission Shareat : 10 % ajoutés au prix fixé par l'hôte.
+ * TAUX PROVISOIRE : le pourcentage définitif sera configuré plus tard (une seule valeur à changer ici).
+ */
 export const COMMISSION_RATE = 0.1
+
+/** Tant que vrai, les pages indiquent que le taux de commission est provisoire. */
+export const COMMISSION_PROVISIONAL = true
 
 /** Annulation gratuite par l'invité jusqu'à 48 h avant le repas. */
 export const FREE_CANCELLATION_HOURS = 48

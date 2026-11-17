@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Italiana, Manrope } from "next/font/google";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
+import Effects from "./components/site/Effects";
 
 const italiana = Italiana({
   variable: "--font-italiana",
@@ -26,7 +27,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="fr" className={`${italiana.variable} ${manrope.variable}`}>
-      <body>{children}</body>
+      <body>
+        <Effects />
+        {children}
+      </body>
     </html>
   );
 }
