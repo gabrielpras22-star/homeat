@@ -141,15 +141,9 @@ async function fetchMeals(): Promise<Meal[]> {
 }
 
 async function fetchProfile(user: User): Promise<Profile | null> {
+  // Le profil est créé automatiquement par la base à l'inscription.
   const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
-  if (data) return data as Profile
-  // Aucun profil (pas de trigger côté base) : on le crée.
-  const fullName = (user.user_metadata?.full_name as string | undefined) || ''
-  const { data: created } = await supabase.from('profiles')
-    .upsert({ id: user.id, full_name: fullName })
-    .select('*')
-    .maybeSingle()
-  return (created as Profile | null) || null
+  return (data as Profile | null) || null
 }
 
 async function fetchBookings(uid: string): Promise<Booking[]> {
@@ -169,7 +163,7 @@ async function fetchFavorites(uid: string): Promise<Meal[]> {
 
 async function fetchReviews(mealId: string): Promise<Review[]> {
   const { data } = await supabase.from('reviews')
-    .select('*, profiles(full_name)')
+    .select('*, profiles!reviews_reviewer_id_fkey(full_name)')
     .eq('meal_id', mealId)
     .order('created_at', { ascending: false })
   return (data || []) as Review[]
@@ -609,10 +603,12 @@ export default function Shareat() {
       total_amount: total,
       status: 'confirmed'
     })
-    if (error) { setLoading(false); showToast('❌ Erreur : ' + error.message); return }
-    // Mise à jour des places restantes (ignorée si la base l'interdit).
-    await supabase.from('meals').update({ available_seats: seatsLeft - guests }).eq('id', selectedMeal.id)
     setLoading(false)
+    if (error) {
+      showToast(/places/i.test(error.message) ? '⚠️ Plus assez de places disponibles' : '❌ Erreur : ' + error.message)
+      return
+    }
+    // Les places restantes sont décrémentées par la base (trigger).
     setBookedSeats(guests)
     setSelectedMeal({ ...selectedMeal, available_seats: seatsLeft - guests })
     setGuests(1)
@@ -705,12 +701,12 @@ export default function Shareat() {
     const full_name = `${profileFname.trim()} ${profileLname.trim()}`.trim()
     if (!full_name) { showToast('⚠️ Indiquez au moins votre prénom'); return }
     setLoading(true)
-    const { data, error } = await supabase.from('profiles').upsert({
-      id: user.id,
+    // update (et non upsert) : la base n'autorise que la modification de son profil.
+    const { data, error } = await supabase.from('profiles').update({
       full_name,
       city: profileCity.trim(),
       bio: profileBio.trim()
-    }).select('*').maybeSingle()
+    }).eq('id', user.id).select('*').maybeSingle()
     setLoading(false)
     if (error) { showToast('❌ ' + error.message); return }
     if (data) setProfile(data as Profile)
