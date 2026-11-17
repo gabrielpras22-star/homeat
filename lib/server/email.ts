@@ -37,7 +37,7 @@ export async function userEmail(userId: string): Promise<string | null> {
   }
 }
 
-export const siteUrl = () => (process.env.NEXT_PUBLIC_SITE_URL || 'https://homeat-sigma.vercel.app').replace(/\/$/, '')
+export const siteUrl = () => (process.env.NEXT_PUBLIC_SITE_URL || 'https://shareat-fr.vercel.app').replace(/\/$/, '')
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 

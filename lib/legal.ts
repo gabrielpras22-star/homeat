@@ -11,7 +11,7 @@ export const PUBLISHER = {
 
 export const SITE = {
   name: 'Shareat',
-  url: 'https://homeat-sigma.vercel.app',
+  url: 'https://shareat-fr.vercel.app',
 }
 
 export const LAST_UPDATE = '17 novembre 2026'
