@@ -20,7 +20,8 @@ export default function Confidentialite() {
           <tbody>
             <tr><td>Nom, email, mot de passe (chiffré)</td><td>Créer et sécuriser votre compte</td><td>Exécution du contrat</td></tr>
             <tr><td>Ville, présentation (facultatives)</td><td>Présenter votre profil aux autres membres</td><td>Exécution du contrat</td></tr>
-            <tr><td>Annonces : titre, menu, prix, date, catégories, photo</td><td>Publier vos tables</td><td>Exécution du contrat</td></tr>
+            <tr><td>Annonces : titre, menu, prix, date, catégories, allergènes, photo</td><td>Publier vos tables</td><td>Exécution du contrat</td></tr>
+            <tr><td>Adresse email</td><td>Emails de service : confirmation et rappel de réservation, annulation, virement, nouveau message</td><td>Exécution du contrat</td></tr>
             <tr><td>Adresse du repas</td><td>La communiquer aux invités ayant réservé ; seule une zone d’environ 1 km est publique</td><td>Exécution du contrat</td></tr>
             <tr><td>Réservations et montants</td><td>Gérer les réservations, annulations et remboursements</td><td>Exécution du contrat ; obligations comptables</td></tr>
             <tr><td>Messages entre membres</td><td>Permettre les échanges avant et après le repas</td><td>Exécution du contrat</td></tr>
@@ -34,7 +35,8 @@ export default function Confidentialite() {
 
       <h2>Destinataires et sous-traitants</h2>
       <ul>
-        <li><strong>Supabase</strong> (base de données et authentification) : {PROVIDERS.database}.</li>
+        <li><strong>Supabase</strong> (base de données, authentification et stockage des photos) : {PROVIDERS.database}.</li>
+        <li><strong>Resend</strong> (envoi des emails de service) : Resend, Inc., 2261 Market Street #5039, San Francisco, CA 94114, États-Unis.</li>
         <li><strong>Vercel</strong> (hébergement du site) : {PROVIDERS.hosting}.</li>
         <li><strong>Stripe</strong> (paiements et versements) : {PROVIDERS.payments}.</li>
         <li><strong>OpenStreetMap</strong> (fonds de carte) et <strong>Unsplash</strong> (photos d’illustration) : votre navigateur charge des images depuis leurs serveurs, qui reçoivent à cette occasion votre adresse IP.</li>

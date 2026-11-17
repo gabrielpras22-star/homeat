@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, supabaseConfigured } from '../lib/supabase'
-import { CATEGORIES, CUISINES, COMMISSION_RATE, FREE_CANCELLATION_HOURS, displayPrice, parisDateTime, todayParis } from '../lib/shared'
+import { ALLERGENS, CATEGORIES, CUISINES, COMMISSION_RATE, FREE_CANCELLATION_HOURS, STUDENT_MAX_PRICE, TRANSFER_DELAY_HOURS, displayPrice, parisDateTime, todayParis } from '../lib/shared'
 import { geocodeAddress, approx, type GeoResult } from '../lib/geocode'
 import MealMap, { type MapPoint } from './components/MealMap'
 
@@ -32,6 +32,7 @@ type Meal = {
   city: string
   menu: string[] | null
   tags: string[] | null
+  allergens: string[] | null
   photo_url: string | null
   rating: number | null
   reviews_count: number | null
@@ -120,7 +121,10 @@ const stars = (rating: number) => {
 const seatsLabel = (n: number) => (n > 0 ? `${n} place${n > 1 ? 's' : ''}` : 'Complet')
 const hoursUntil = (m: Pick<Meal, 'date' | 'time'>) => (parisDateTime(m.date, m.time).getTime() - Date.now()) / 3_600_000
 
-const MEAL_COLS = 'id, title, cuisine, price_per_seat, available_seats, max_seats, date, time, city, menu, tags, photo_url, rating, reviews_count, description, host_id, is_active, lat, lng'
+/** Prix hôte maximal pour que le prix affiché reste ≤ 10 € (repas étudiant). */
+const STUDENT_MAX_HOST_PRICE = Math.floor((STUDENT_MAX_PRICE / (1 + COMMISSION_RATE)) * 100) / 100
+
+const MEAL_COLS = 'id, title, cuisine, price_per_seat, available_seats, max_seats, date, time, city, menu, tags, allergens, photo_url, rating, reviews_count, description, host_id, is_active, lat, lng'
 const PROFILE_COLS = 'id, full_name, avatar_url, bio, city, rating, reviews_count'
 
 /** Appel d'une route serveur, avec le jeton de session de l'utilisateur. */
@@ -134,6 +138,17 @@ async function api<T>(path: string, body: unknown = {}): Promise<T> {
   const json = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error((json as { error?: string }).error || 'Le serveur ne répond pas. Réessayez dans un instant.')
   return json as T
+}
+
+/** Réduit une photo (max 1600 px, JPEG) avant envoi : plus rapide sur mobile et moins de stockage. */
+async function resizeImage(file: File, max = 1600): Promise<Blob> {
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  return new Promise((resolve, reject) => canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Image illisible'))), 'image/jpeg', 0.82))
 }
 
 // ═════════════════════════════ DATA ═════════════════════════════
@@ -191,7 +206,7 @@ async function fetchHostData(uid: string) {
     const { data } = await supabase.from('bookings')
       .select('id, meal_id, seats, status, host_amount, profiles!bookings_guest_id_fkey(full_name)')
       .in('meal_id', list.map(m => m.id))
-      .eq('status', 'confirmed')
+      .in('status', ['confirmed', 'completed'])
     bookings = (data || []) as unknown as HostBooking[]
   }
   return { meals: list, bookings }
@@ -365,6 +380,9 @@ export default function Shareat() {
   const [hostMenu, setHostMenu] = useState('')
   const [hostPhoto, setHostPhoto] = useState('')
   const [hostTags, setHostTags] = useState<string[]>([])
+  const [hostAllergens, setHostAllergens] = useState<string[]>([])
+  const [noAllergens, setNoAllergens] = useState(false)
+  const [photoBusy, setPhotoBusy] = useState(false)
   const [hostAddress, setHostAddress] = useState('')
   const [addressMatches, setAddressMatches] = useState<GeoResult[]>([])
   const [addressPick, setAddressPick] = useState<GeoResult | null>(null)
@@ -583,7 +601,7 @@ export default function Shareat() {
   const total = selectedMeal ? money(displayPrice(selectedMeal.price_per_seat) * guests) : 0
   const isOwnMeal = Boolean(selectedMeal && user && selectedMeal.host_id === user.id)
   const soldOut = Boolean(selectedMeal && selectedMeal.available_seats <= 0)
-  const hasBooked = Boolean(selectedMeal && bookings.some(b => b.meal_id === selectedMeal.id && b.status === 'confirmed'))
+  const hasBooked = Boolean(selectedMeal && bookings.some(b => b.meal_id === selectedMeal.id && (b.status === 'confirmed' || b.status === 'completed')))
 
   const priceNum = parseFloat(hostPrice.replace(',', '.'))
   const pricePreview = Number.isFinite(priceNum) && priceNum > 0 ? displayPrice(priceNum) : null
@@ -767,6 +785,7 @@ export default function Shareat() {
     const m = data as Message
     setMessages(prev => (prev.some(p => p.id === m.id) ? prev : [...prev, m]))
     fetchConversations(user.id).then(setConversations)
+    api('/api/notify/message', { message_id: m.id }).catch(() => undefined)
   }
 
   const searchAddress = async () => {
@@ -784,6 +803,23 @@ export default function Shareat() {
     }
   }
 
+  const uploadPhoto = async (file: File | undefined) => {
+    if (!file || !user) return
+    if (!file.type.startsWith('image/')) { showToast('Choisissez une image (JPEG, PNG ou WebP)'); return }
+    setPhotoBusy(true)
+    try {
+      const blob = await resizeImage(file)
+      const path = `${user.id}/${Date.now()}.jpg`
+      const { error } = await supabase.storage.from('meal-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false })
+      if (error) throw error
+      setHostPhoto(supabase.storage.from('meal-photos').getPublicUrl(path).data.publicUrl)
+    } catch (e) {
+      showToast('Envoi de la photo impossible : ' + ((e as Error).message || 'réessayez'))
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
   const publishMeal = async () => {
     if (!user) { requireAuth(); return }
     if (!payouts?.active) { showToast('Activez vos versements avant de publier'); return }
@@ -794,7 +830,9 @@ export default function Shareat() {
     if (!Number.isFinite(price) || price <= 0 || price > 500) { showToast('Prix invalide (entre 1 et 500 €)'); return }
     if (!Number.isInteger(seats) || seats < 1 || seats > 50) { showToast('Nombre de couverts invalide (1 à 50)'); return }
     if (hostDate < todayParis()) { showToast('La date doit être aujourd’hui ou plus tard'); return }
-    if (hostPhoto.trim() && !isHttpsUrl(hostPhoto)) { showToast('Le lien de la photo doit commencer par https://'); return }
+    if (hostAllergens.length === 0 && !noAllergens) { showToast('Indiquez les allergènes présents, ou cochez « aucun allergène majeur »'); return }
+    if (hostTags.includes('Repas étudiant') && displayPrice(price) > STUDENT_MAX_PRICE) { showToast(`Repas étudiant : votre prix doit être de ${eur(STUDENT_MAX_HOST_PRICE)} maximum (${STUDENT_MAX_PRICE} € pour l’invité)`); return }
+    if (photoBusy) { showToast('Patientez pendant l’envoi de la photo'); return }
     setLoading(true)
     const { data: created, error } = await supabase.from('meals').insert({
       host_id: user.id,
@@ -809,6 +847,7 @@ export default function Shareat() {
       description: hostDesc.trim(),
       menu: hostMenu.split('\n').map(l => l.trim()).filter(Boolean),
       tags: hostTags,
+      allergens: noAllergens ? [] : hostAllergens,
       is_active: true,
       photo_url: hostPhoto.trim() || null,
       lat: approx(addressPick.lat),
@@ -823,7 +862,7 @@ export default function Shareat() {
     else showToast('Votre table est publiée')
     reloadMeals()
     setHostReload(n => n + 1)
-    setHostTitle(''); setHostPrice(''); setHostDate(''); setHostSeats(''); setHostDesc(''); setHostMenu(''); setHostPhoto(''); setHostTags([])
+    setHostTitle(''); setHostPrice(''); setHostDate(''); setHostSeats(''); setHostDesc(''); setHostMenu(''); setHostPhoto(''); setHostTags([]); setHostAllergens([]); setNoAllergens(false)
   }
 
   const saveProfile = async () => {
@@ -976,7 +1015,7 @@ export default function Shareat() {
               <div className="banner-txt">
                 <p className="eyebrow">Hôtes</p>
                 <h2 className="title">Ouvrez votre table</h2>
-                <p>Fixez votre prix, vos dates et vos catégories. Les paiements vous sont versés automatiquement.</p>
+                <p>Fixez votre prix, vos dates et vos catégories. Vos gains vous sont virés automatiquement après chaque repas.</p>
                 <button className="btn btn-primary" onClick={() => nav('become')}>Devenir hôte</button>
               </div>
             </div>
@@ -1037,6 +1076,15 @@ export default function Shareat() {
               )}
 
               {selectedMeal.description && <p className="prose">{selectedMeal.description}</p>}
+
+              <div className="allergens">
+                <span className="field-label">Allergènes</span>
+                {selectedMeal.allergens == null
+                  ? <p className="muted">Non renseignés : demandez à l’hôte avant de réserver.</p>
+                  : selectedMeal.allergens.length === 0
+                    ? <p>Aucun des 14 allergènes majeurs déclaré par l’hôte.</p>
+                    : <div className="tag-row">{selectedMeal.allergens.map(a => <span key={a} className="tag tag-warn">{a}</span>)}</div>}
+              </div>
 
               <div className="host-card">
                 <Avatar name={selectedMeal.profiles?.full_name} size={52} />
@@ -1188,7 +1236,7 @@ export default function Shareat() {
                   <>
                     <h2 className="title">Bonjour {profile?.full_name?.split(' ')[0] || ''}</h2>
                     <div className="stats">
-                      {[[bookings.filter(b => b.status === 'confirmed').length, 'Réservations'], [favMeals.length, 'Favoris'], [meals.length, 'Tables à venir']].map(([v, l]) => (
+                      {[[bookings.filter(b => b.status === 'confirmed' || b.status === 'completed').length, 'Réservations'], [favMeals.length, 'Favoris'], [meals.length, 'Tables à venir']].map(([v, l]) => (
                         <div key={l} className="stat"><strong>{v}</strong><span>{l}</span></div>
                       ))}
                     </div>
@@ -1203,9 +1251,9 @@ export default function Shareat() {
                     {bookings.length === 0
                       ? <div className="empty"><p>Aucune réservation pour l’instant.</p><button className="btn btn-primary" onClick={() => nav('explore')}>Explorer les tables</button></div>
                       : bookings.map(b => {
-                        const past = b.meals ? b.meals.date.slice(0, 10) <= todayParis() : false
+                        const past = b.status === 'completed' || (b.meals ? b.meals.date.slice(0, 10) <= todayParis() : false)
                         const canCancel = b.status === 'confirmed' && b.meals && hoursUntil(b.meals) >= FREE_CANCELLATION_HOURS
-                        const canReview = b.status === 'confirmed' && past && !reviewedIds.has(b.id)
+                        const canReview = (b.status === 'confirmed' || b.status === 'completed') && past && !reviewedIds.has(b.id)
                         return (
                           <div key={b.id} className="booking">
                             {b.meals && <img src={mealPhoto(b.meals, 300)} alt="" onClick={() => openMeal(b.meals!)} />}
@@ -1262,7 +1310,7 @@ export default function Shareat() {
                       <div>
                         <p className="subtitle payout-title">Versements</p>
                         {payouts?.active
-                          ? <p>Vos versements sont activés. Pour chaque réservation, vous recevez votre prix ; Shareat ajoute {Math.round(COMMISSION_RATE * 100)} % payés par l’invité.</p>
+                          ? <p>Vos versements sont activés. Vous recevez votre prix pour chaque couvert, viré {TRANSFER_DELAY_HOURS} h après le repas ; Shareat ajoute {Math.round(COMMISSION_RATE * 100)} % payés par l’invité.</p>
                           : <p>Pour publier une table et être payé, reliez un compte de versement Stripe (identité et IBAN). Cela prend environ 5 minutes.</p>}
                       </div>
                       {payouts?.active
@@ -1314,7 +1362,10 @@ export default function Shareat() {
                             </select>
                           </label>
                           <Inp label="Votre prix par couvert (€) *" placeholder="20" value={hostPrice} onChange={setHostPrice} type="number" min="1" inputMode="decimal"
-                            hint={pricePreview != null ? <>Vous recevez {eur(priceNum)} par couvert. Prix affiché aux invités : {eur(pricePreview)} (commission Shareat {Math.round(COMMISSION_RATE * 100)} %).</> : undefined} />
+                            hint={<>
+                              {pricePreview != null && <>Vous recevez {eur(priceNum)} par couvert. Prix affiché aux invités : {eur(pricePreview)} (commission Shareat {Math.round(COMMISSION_RATE * 100)} %).</>}
+                              {hostTags.includes('Repas étudiant') && <> Repas étudiant : {eur(STUDENT_MAX_HOST_PRICE)} maximum ({STUDENT_MAX_PRICE} € pour l’invité).</>}
+                            </>} />
                         </div>
 
                         <div className="field">
@@ -1352,10 +1403,38 @@ export default function Shareat() {
                           <Inp label="Heure" placeholder="Heure" value={hostTime} onChange={setHostTime} type="time" />
                         </div>
                         <Inp label="Nombre de couverts *" placeholder="6" value={hostSeats} onChange={setHostSeats} type="number" min="1" inputMode="numeric" />
-                        <Inp label="Photo de votre plat (lien https, facultatif)" placeholder="https://…" value={hostPhoto} onChange={setHostPhoto} type="url" inputMode="url" />
+                        <div className="field">
+                          <span className="field-label">Allergènes présents * (14 allergènes majeurs)</span>
+                          <div className="chips chips-wrap" role="group" aria-label="Allergènes">
+                            {ALLERGENS.map(a => (
+                              <button type="button" key={a} aria-pressed={hostAllergens.includes(a)} disabled={noAllergens} className={`chip chip-soft${hostAllergens.includes(a) ? ' on' : ''}`}
+                                onClick={() => setHostAllergens(prev => (prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]))}>{a}</button>
+                            ))}
+                          </div>
+                          <label className="check check-tight">
+                            <input type="checkbox" checked={noAllergens} onChange={e => { setNoAllergens(e.target.checked); if (e.target.checked) setHostAllergens([]) }} />
+                            <span>Ce repas ne contient aucun de ces 14 allergènes</span>
+                          </label>
+                        </div>
+
+                        <div className="field">
+                          <span className="field-label">Photo de votre plat (facultatif)</span>
+                          {hostPhoto ? (
+                            <div className="photo-preview">
+                              <img src={hostPhoto} alt="Aperçu de la photo" />
+                              <button type="button" className="link danger-link" onClick={() => setHostPhoto('')}>Retirer la photo</button>
+                            </div>
+                          ) : (
+                            <label className={`btn btn-ghost photo-btn${photoBusy ? ' busy' : ''}`}>
+                              {photoBusy ? 'Envoi en cours…' : 'Prendre ou choisir une photo'}
+                              <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden onChange={e => { uploadPhoto(e.target.files?.[0]); e.target.value = '' }} />
+                            </label>
+                          )}
+                          <span className="field-hint">Sans photo, une image d’illustration de la cuisine choisie est affichée.</span>
+                        </div>
                         <label className="field">
-                          <span className="field-label">Description (ambiance, allergènes…)</span>
-                          <textarea className="input" value={hostDesc} onChange={e => setHostDesc(e.target.value)} placeholder="L’ambiance, l’histoire du plat, les allergènes présents…" rows={3} aria-label="Description" />
+                          <span className="field-label">Description</span>
+                          <textarea className="input" value={hostDesc} onChange={e => setHostDesc(e.target.value)} placeholder="L’ambiance, l’histoire du plat…" rows={3} aria-label="Description" />
                         </label>
                         <label className="field">
                           <span className="field-label">Menu (un plat par ligne)</span>
@@ -1386,7 +1465,7 @@ export default function Shareat() {
           </section>
           <section className="section">
             <div className="steps">
-              {[['01', 'Vous fixez votre prix', `Vous recevez le prix que vous fixez. Shareat ajoute ${Math.round(COMMISSION_RATE * 100)} % payés par l’invité, et les versements arrivent sur votre compte bancaire via Stripe.`],
+              {[['01', 'Vous fixez votre prix', `Vous recevez le prix que vous fixez, viré ${TRANSFER_DELAY_HOURS} h après le repas sur votre compte bancaire via Stripe. Shareat ajoute ${Math.round(COMMISSION_RATE * 100)} % payés par l’invité.`],
                 ['02', 'Vous choisissez date et catégories', 'Une date, un nombre de couverts, et les catégories qui décrivent votre repas : repas étudiant, halal, casher, végétarien…'],
                 ['03', 'Vous échangez avant', 'Vos invités peuvent vous écrire avant de réserver. Votre adresse exacte n’est communiquée qu’après le paiement.']].map(([n, t, d]) => (
                 <div key={n} className="step">
@@ -1455,7 +1534,7 @@ export default function Shareat() {
                     ? <>Votre place chez <strong>{bookingResult.meal.profiles?.full_name || 'votre hôte'}</strong> est réservée pour <strong>{bookingResult.seats} couvert{bookingResult.seats > 1 ? 's' : ''}</strong>, {fmtDate(bookingResult.meal.date, true)} à {fmtTime(bookingResult.meal.time)}.</>
                     : <>Votre réservation est confirmée.</>}
                 </p>
-                <p className="muted small">L’adresse exacte est visible sur la page du repas. Un reçu Stripe vous est envoyé par email.</p>
+                <p className="muted small">L’adresse exacte est visible sur la page du repas et dans l’email de confirmation. Un rappel vous sera envoyé la veille.</p>
                 <div className="row-btns">
                   {bookingResult.meal && <button className="btn btn-primary" onClick={() => { const m = bookingResult.meal!; setBookingResult(null); openMeal(m) }}>Voir le repas et l’adresse</button>}
                   <button className="btn btn-ghost" onClick={() => { setBookingResult(null); setDashTab('bookings'); nav('dashboard') }}>Mes réservations</button>

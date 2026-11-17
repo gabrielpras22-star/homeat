@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import LegalPage from '../components/LegalPage'
 import { PUBLISHER } from '@/lib/legal'
-import { COMMISSION_RATE, FREE_CANCELLATION_HOURS } from '@/lib/shared'
+import { COMMISSION_RATE, FREE_CANCELLATION_HOURS, STUDENT_MAX_PRICE, TRANSFER_DELAY_HOURS } from '@/lib/shared'
 
 export const metadata: Metadata = { title: 'Conditions d’utilisation et de vente — Shareat' }
 
@@ -29,19 +29,21 @@ export default function Conditions() {
       <p>En publiant une table, l’hôte s’engage à :</p>
       <ul>
         <li>décrire honnêtement le repas, son prix, son lieu et ses catégories (« Halal », « Casher », « Végétarien », « Sans gluten »…), qui l’engagent ;</li>
-        <li>indiquer dans la description les allergènes présents, et répondre aux questions des invités sur la composition des plats ;</li>
+        <li>déclarer, pour chaque table, les allergènes majeurs présents parmi les 14 listés par le règlement (UE) n° 1169/2011 (ou leur absence), et répondre aux questions des invités sur la composition des plats ;</li>
+        <li>pour la catégorie « Repas étudiant », proposer un prix payé par l’invité de {STUDENT_MAX_PRICE} € maximum par couvert ;</li>
+        <li>n’utiliser que des photos dont il détient les droits ;</li>
         <li>respecter les règles d’hygiène alimentaire et de sécurité, et accueillir les invités dans un logement adapté ;</li>
         <li>respecter la réglementation applicable à son activité, notamment son caractère occasionnel ; une activité régulière et lucrative peut nécessiter une déclaration ou une immatriculation ;</li>
         <li>vérifier que son assurance habitation couvre l’accueil de personnes à son domicile ;</li>
         <li>déclarer ses revenus. Les sommes perçues via Shareat peuvent être imposables et soumises à cotisations sociales : informations sur <a href="https://www.impots.gouv.fr" target="_blank" rel="noopener">impots.gouv.fr</a> et <a href="https://www.urssaf.fr" target="_blank" rel="noopener">urssaf.fr</a>. Conformément à l’article 242 bis du Code général des impôts, Shareat adresse chaque année aux hôtes un récapitulatif des sommes perçues et transmet ces informations à l’administration fiscale lorsque la loi l’impose.</li>
       </ul>
-      <p>Pour recevoir ses gains, l’hôte ouvre un compte de versement auprès de Stripe et accepte les conditions de service de Stripe. La vérification d’identité est effectuée par Stripe.</p>
+      <p>Pour recevoir ses gains, l’hôte ouvre un compte de versement auprès de Stripe et accepte les conditions de service de Stripe. La vérification d’identité est effectuée par Stripe. La part de l’hôte (son prix par couvert multiplié par le nombre de couverts réservés) lui est virée environ {TRANSFER_DELAY_HOURS} h après le repas, puis arrive sur son compte bancaire selon le calendrier de versement Stripe.</p>
 
       <h2>5. Obligations des invités</h2>
       <p>L’invité s’engage à se présenter à l’heure convenue, à respecter le domicile de l’hôte et les autres convives, et à signaler à l’avance ses allergies ou restrictions alimentaires.</p>
 
       <h2>6. Prix et paiement</h2>
-      <p>Le prix affiché par couvert est le prix fixé par l’hôte augmenté de la commission Shareat de {pct}. Il est indiqué toutes taxes comprises, en euros. Le paiement s’effectue en ligne, en totalité, au moment de la réservation, par l’intermédiaire de Stripe. La réservation est confirmée dès l’acceptation du paiement ; un reçu est envoyé par email. La part revenant à l’hôte lui est reversée par Stripe sur son compte de versement.</p>
+      <p>Le prix affiché par couvert est le prix fixé par l’hôte augmenté de la commission Shareat de {pct}. Il est indiqué toutes taxes comprises, en euros. Le paiement s’effectue en ligne, en totalité, au moment de la réservation, par l’intermédiaire de Stripe. Shareat encaisse le paiement pour le compte de l’hôte et conserve sa commission ; la part de l’hôte lui est virée environ {TRANSFER_DELAY_HOURS} h après le repas, ce qui permet de rembourser les invités si le repas n’a pas lieu. La réservation est confirmée dès l’acceptation du paiement ; un email de confirmation, puis un rappel la veille du repas, sont envoyés à l’invité.</p>
 
       <h2>7. Absence de droit de rétractation</h2>
       <p>Conformément à l’article L221-28, 12° du Code de la consommation, le droit de rétractation ne s’applique pas aux prestations de restauration fournies à une date déterminée. Les conditions d’annulation ci-dessous s’appliquent à la place.</p>
@@ -50,7 +52,8 @@ export default function Conditions() {
       <ul>
         <li><strong>Par l’invité, jusqu’à {FREE_CANCELLATION_HOURS} h avant le repas</strong> : annulation gratuite depuis l’espace « Réservations », remboursement intégral (commission comprise).</li>
         <li><strong>Par l’invité, moins de {FREE_CANCELLATION_HOURS} h avant le repas</strong> : la réservation reste due. L’invité peut contacter l’hôte, libre d’accepter un remboursement.</li>
-        <li><strong>Par l’hôte</strong>, à tout moment : tous les invités sont remboursés intégralement et automatiquement.</li>
+        <li><strong>Par l’hôte</strong>, à tout moment : tous les invités sont remboursés intégralement et automatiquement, et prévenus par email.</li>
+        <li><strong>Repas qui n’a pas eu lieu</strong> : l’invité le signale à {PUBLISHER.email} dans les {TRANSFER_DELAY_HOURS} h suivant l’heure prévue ; après vérification, il est remboursé.</li>
         <li><strong>Table complète pendant le paiement</strong> : si la dernière place est prise par un autre invité pendant le paiement, l’invité est remboursé intégralement et automatiquement.</li>
       </ul>
       <p>Les remboursements sont effectués sur le moyen de paiement utilisé, généralement sous 5 à 10 jours ouvrés selon la banque.</p>

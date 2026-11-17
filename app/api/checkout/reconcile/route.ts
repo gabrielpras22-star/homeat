@@ -1,5 +1,5 @@
 import { admin, handle, requireUser, stripe } from '@/lib/server/clients'
-import { cancelBooking, fulfillCheckoutSession, type BookingRow } from '@/lib/server/bookings'
+import { BOOKING_COLS, cancelBooking, fulfillCheckoutSession, type BookingRow } from '@/lib/server/bookings'
 
 /**
  * Filet de sécurité appelé à chaque visite d'un invité connecté : finalise les paiements
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   return handle(async () => {
     const user = await requireUser(request)
     const { data } = await admin().from('bookings')
-      .select('id, meal_id, guest_id, seats, total_amount, status, stripe_checkout_session_id, stripe_payment_intent_id')
+      .select(BOOKING_COLS)
       .eq('guest_id', user.id).eq('status', 'pending').not('stripe_checkout_session_id', 'is', null)
     let confirmed = 0
     for (const b of (data || []) as BookingRow[]) {

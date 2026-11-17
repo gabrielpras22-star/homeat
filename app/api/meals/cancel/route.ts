@@ -1,5 +1,6 @@
 import { admin, handle, HttpError, readJson, requireUser } from '@/lib/server/clients'
-import { cancelBooking, type BookingRow } from '@/lib/server/bookings'
+import { BOOKING_COLS, cancelBooking, type BookingRow } from '@/lib/server/bookings'
+import { notifyBookingCancelled } from '@/lib/server/notify'
 
 /** Annulation d'une table par son hôte : tous les invités sont remboursés intégralement. */
 export async function POST(request: Request) {
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     await db.from('meals').update({ is_active: false }).eq('id', meal.id)
 
     const { data: bookings } = await db.from('bookings')
-      .select('id, meal_id, guest_id, seats, total_amount, status, stripe_checkout_session_id, stripe_payment_intent_id')
+      .select(BOOKING_COLS)
       .eq('meal_id', meal.id).in('status', ['pending', 'confirmed'])
     let refundedGuests = 0
     const failures: string[] = []
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
       try {
         const { refunded } = await cancelBooking(b)
         if (refunded > 0) refundedGuests++
+        if (b.status === 'confirmed') await notifyBookingCancelled(b, refunded, true)
       } catch (e) {
         failures.push(b.id)
         console.error('Remboursement impossible', b.id, e)

@@ -1,6 +1,6 @@
 import { admin, handle, HttpError, readJson, requireUser, siteOrigin, stripe } from '@/lib/server/clients'
 import { bookingAmounts, displayCents, todayParis } from '@/lib/shared'
-import { cancelBooking, fulfillCheckoutSession, type BookingRow } from '@/lib/server/bookings'
+import { BOOKING_COLS, cancelBooking, fulfillCheckoutSession, type BookingRow } from '@/lib/server/bookings'
 
 /** Crée une réservation en attente et la page de paiement Stripe correspondante. */
 export async function POST(request: Request) {
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
     // Une seule réservation en attente par invité et par table : on ferme les anciennes pages de paiement.
     const { data: oldPending } = await db.from('bookings')
-      .select('id, meal_id, guest_id, seats, total_amount, status, stripe_checkout_session_id, stripe_payment_intent_id')
+      .select(BOOKING_COLS)
       .eq('meal_id', meal.id).eq('guest_id', user.id).eq('status', 'pending')
     for (const old of (oldPending || []) as BookingRow[]) {
       if (old.stripe_checkout_session_id) {
@@ -69,10 +69,11 @@ export async function POST(request: Request) {
             },
           },
         }],
+        // Encaissé par Shareat ; la part de l'hôte lui est virée 24 h après le repas (tâche planifiée).
         payment_intent_data: {
-          application_fee_amount: amounts.fee,
-          transfer_data: { destination: payout.stripe_account_id },
-          metadata: { booking_id: booking.id, meal_id: meal.id },
+          transfer_group: booking.id,
+          description: `Shareat : ${meal.title}`,
+          metadata: { booking_id: booking.id, meal_id: meal.id, host_id: meal.host_id },
         },
         metadata: { booking_id: booking.id, meal_id: meal.id },
         expires_at: Math.floor(Date.now() / 1000) + 30 * 60,

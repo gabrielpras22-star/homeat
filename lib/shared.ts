@@ -6,6 +6,18 @@ export const COMMISSION_RATE = 0.1
 /** Annulation gratuite par l'invité jusqu'à 48 h avant le repas. */
 export const FREE_CANCELLATION_HOURS = 48
 
+/** La part de l'hôte lui est virée 24 h après le début du repas. */
+export const TRANSFER_DELAY_HOURS = 24
+
+/** Prix maximal payé par l'invité pour un « Repas étudiant ». */
+export const STUDENT_MAX_PRICE = 10
+
+/** 14 allergènes majeurs à déclarer (règlement UE n° 1169/2011). */
+export const ALLERGENS = [
+  'Gluten', 'Crustacés', 'Œufs', 'Poissons', 'Arachides', 'Soja', 'Lait',
+  'Fruits à coque', 'Céleri', 'Moutarde', 'Sésame', 'Sulfites', 'Lupin', 'Mollusques',
+] as const
+
 export const CUISINES = ['Marocaine', 'Italienne', 'Japonaise', 'Mexicaine', 'Indienne', 'Française', 'Libanaise', 'Espagnole', 'Autre'] as const
 
 /** Catégories de repas (doivent rester identiques à la contrainte meals_tags_allowed en base). */

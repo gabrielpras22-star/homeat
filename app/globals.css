@@ -428,3 +428,14 @@ select.input option { background: var(--surface-solid); }
 .legal .table-wrap { overflow-x: auto; }
 .legal-back { display: inline-block; margin-bottom: 2rem; color: var(--sky); font-size: 0.9rem; }
 .legal-updated { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem !important; }
+
+/* ── Allergènes et photos ── */
+.allergens { margin: 0 0 2rem; }
+.allergens p { margin: 0; color: var(--soft); }
+.tag-warn { border-color: rgba(233, 211, 160, 0.5); color: var(--warn); }
+.check-tight { margin: 0.8rem 0 0; }
+.chip:disabled { opacity: 0.35; cursor: not-allowed; }
+.photo-btn { cursor: pointer; }
+.photo-btn.busy { opacity: 0.6; pointer-events: none; }
+.photo-preview { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.photo-preview img { width: 160px; height: 110px; object-fit: cover; border-radius: 14px; border: 1px solid var(--line); }

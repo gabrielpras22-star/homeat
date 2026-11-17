@@ -1,5 +1,6 @@
 import { admin, handle, HttpError, readJson, requireUser } from '@/lib/server/clients'
 import { cancelBooking, getBooking } from '@/lib/server/bookings'
+import { notifyBookingCancelled } from '@/lib/server/notify'
 import { FREE_CANCELLATION_HOURS, parisDateTime } from '@/lib/shared'
 
 /** Annulation par l'invité : gratuite (remboursement intégral) jusqu'à 48 h avant le repas. */
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
       }
     }
     const { refunded } = await cancelBooking(booking)
+    if (booking.status === 'confirmed') await notifyBookingCancelled(booking, refunded, false)
     return { status: 'cancelled', refunded }
   })
 }
