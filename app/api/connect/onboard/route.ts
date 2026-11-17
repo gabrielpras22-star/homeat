@@ -21,6 +21,11 @@ export async function POST(request: Request) {
         defaults: {
           currency: 'eur',
           locales: ['fr-FR'],
+          // Prérempli pour que l'hôte n'ait pas à indiquer de site web ni d'activité.
+          profile: {
+            business_url: siteOrigin(request),
+            product_description: 'Repas faits maison servis chez moi à des invités, réservés et payés via Shareat.',
+          },
           responsibilities: { fees_collector: 'application', losses_collector: 'application' },
         },
         metadata: { shareat_user_id: user.id },
