@@ -4,7 +4,9 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Icon from '../site/Icons'
-import type { DemoThread } from '@/lib/apercu'
+import { PUBLISHER } from '@/lib/legal'
+import { supabase } from '@/lib/supabase'
+import { loadConversation, loadThreads, markRead, sendMessage, type ChatMessage, type Thread } from '@/lib/space'
 
 // ─────────────── Petits utilitaires ───────────────
 
@@ -89,15 +91,15 @@ export function Confirm({ title, children, confirm, danger, onYes, onNo }: { tit
 
 export type Tab = { id: string; label: string; icon: string; badge?: number }
 
-export function SpaceLayout({ who, role, tabs, tab, setTab, children, switchTo }: {
-  who: string; role: string; tabs: Tab[]; tab: string; setTab: (t: string) => void; children: ReactNode; switchTo: { href: string; label: string }
+export function SpaceLayout({ who, avatar, role, tabs, tab, setTab, children, switchTo, onLogout }: {
+  who: string; avatar?: string | null; role: string; tabs: Tab[]; tab: string; setTab: (t: string) => void; children: ReactNode; switchTo: { href: string; label: string }; onLogout: () => void
 }) {
   return (
     <section className="section" style={{ paddingTop: '2rem' }}>
       <div className="space">
         <aside className="space-side glass" aria-label="Menu de mon espace">
           <div className="space-id">
-            <Avatar name={who} size={46} />
+            <Avatar name={who} src={avatar} size={46} />
             <div><strong>{who}</strong><small>{role}</small></div>
           </div>
           {tabs.map(t => (
@@ -106,7 +108,7 @@ export function SpaceLayout({ who, role, tabs, tab, setTab, children, switchTo }
             </button>
           ))}
           <Link className="dash-tab" href={switchTo.href} style={{ textDecoration: 'none', marginTop: '0.6rem' }}><Icon name="arrow" size={19} /><span className="lbl">{switchTo.label}</span></Link>
-          <Link className="dash-tab danger" href="/" style={{ textDecoration: 'none' }}><Icon name="logout" size={19} /><span className="lbl">Déconnexion</span></Link>
+          <button className="dash-tab danger" onClick={onLogout}><Icon name="logout" size={19} /><span className="lbl">Déconnexion</span></button>
         </aside>
         <div className="space-body glass">
           <div key={tab} className="fade-swap">{children}</div>
@@ -123,49 +125,80 @@ export const Head = ({ title, text, action }: { title: string; text?: ReactNode;
   </div>
 )
 
-// ─────────────── Messagerie ───────────────
+// ─────────────── Messagerie (vrais messages) ───────────────
 
-export function Messenger({ threads, setThreads, onReport, blocked = [], onBlock, onUnblock }: {
-  threads: DemoThread[]
-  setThreads: (f: (t: DemoThread[]) => DemoThread[]) => void
-  onReport: (name: string) => void
-  blocked?: string[]
-  onBlock?: (name: string) => void
-  onUnblock?: (name: string) => void
-}) {
-  const [cur, setCur] = useState(threads[0]?.id ?? null)
+const fmtStamp = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+export function Messenger({ uid, openWith, onReport }: { uid: string; openWith?: { id: string; name: string } | null; onReport: (name: string) => void }) {
+  const [threads, setThreads] = useState<Thread[] | null>(null)
+  const [cur, setCur] = useState<string | null>(openWith?.id ?? null)
+  const [msgs, setMsgs] = useState<ChatMessage[]>([])
   const [text, setText] = useState('')
-  const [askDel, setAskDel] = useState<number | null>(null)
+  const [sending, setSending] = useState(false)
+  const [err, setErr] = useState('')
   const box = useRef<HTMLDivElement>(null)
-  const th = threads.find(t => t.id === cur)
-  const isBlocked = Boolean(th && blocked.includes(th.name))
 
-  useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight }, [th?.msgs.length])
+  useEffect(() => {
+    let cancelled = false
+    loadThreads(uid).then(ts => {
+      if (cancelled) return
+      const list = openWith && !ts.some(t => t.id === openWith.id) ? [{ id: openWith.id, name: openWith.name, avatar: null, last: '', lastAt: '', unread: 0 }, ...ts] : ts
+      setThreads(list)
+      setCur(c => c ?? list[0]?.id ?? null)
+    })
+    return () => { cancelled = true }
+  }, [uid, openWith])
 
-  const open = (id: string) => { setCur(id); setAskDel(null); setThreads(ts => ts.map(t => (t.id === id ? { ...t, unread: 0 } : t))) }
-  const send = () => {
-    const v = text.trim().slice(0, 2000)
-    if (!v || !th || isBlocked) return
-    // Protection : on masque les numéros de téléphone et emails pour garder les échanges et paiements sur Shareat.
-    const safe = v.replace(/(\+?\d[\d .-]{7,}\d)/g, '[numéro masqué]').replace(/[^\s@]+@[^\s@]+\.[a-z]{2,}/gi, '[email masqué]')
-    setThreads(ts => ts.map(t => (t.id === th.id ? { ...t, msgs: [...t.msgs, { me: true, text: safe, at: 'à l’instant' }] } : t)))
-    setText('')
+  useEffect(() => {
+    if (!cur) return
+    let cancelled = false
+    loadConversation(uid, cur).then(m => {
+      if (cancelled) return
+      setMsgs(m)
+      if (m.some(x => x.receiver_id === uid && !x.is_read)) markRead(uid, cur)
+      setThreads(ts => ts?.map(t => (t.id === cur ? { ...t, unread: 0 } : t)) ?? ts)
+    })
+    const channel = supabase.channel(`chat-${uid}-${cur}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+        const m = payload.new as ChatMessage
+        const inConv = (m.sender_id === uid && m.receiver_id === cur) || (m.sender_id === cur && m.receiver_id === uid)
+        if (!inConv) return
+        setMsgs(prev => (prev.some(p => p.id === m.id) ? prev : [...prev, m]))
+        if (m.receiver_id === uid) markRead(uid, cur)
+      })
+      .subscribe()
+    return () => { cancelled = true; supabase.removeChannel(channel) }
+  }, [uid, cur])
+
+  useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight }, [msgs.length])
+
+  const th = threads?.find(t => t.id === cur)
+  const send = async () => {
+    const v = text.trim()
+    if (!v || !th || sending) return
+    setSending(true); setErr('')
+    try {
+      const m = await sendMessage(uid, th.id, v)
+      setMsgs(prev => (prev.some(p => p.id === m.id) ? prev : [...prev, m]))
+      setThreads(ts => ts?.map(t => (t.id === th.id ? { ...t, last: m.content, lastAt: m.created_at } : t)) ?? ts)
+      setText('')
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setSending(false)
+    }
   }
-  const remove = (i: number) => {
-    if (!th) return
-    setThreads(ts => ts.map(t => (t.id === th.id ? { ...t, msgs: t.msgs.map((m, k) => (k === i ? { ...m, deleted: true, text: '' } : m)) } : t)))
-    setAskDel(null)
-  }
 
-  if (threads.length === 0) return <div className="empty-soft"><Icon name="chat" size={36} /><p>Aucun message pour l’instant.</p></div>
+  if (threads === null) return <p className="muted">Chargement des messages…</p>
+  if (threads.length === 0) return <div className="empty-soft"><Icon name="chat" size={36} /><p>Aucun message pour l’instant. Vous pourrez écrire à un hôte depuis la page d’un repas.</p></div>
 
   return (
     <div className="messenger">
       <div className="thread-pick" role="tablist" aria-label="Conversations">
         {threads.map(t => (
-          <button key={t.id} role="tab" aria-selected={cur === t.id} className={cur === t.id ? 'on' : ''} onClick={() => open(t.id)}>
-            <Avatar name={t.name} size={40} />
-            <span className="t"><strong>{t.name}</strong><small>{blocked.includes(t.name) ? 'Bloqué' : t.about}</small></span>
+          <button key={t.id} role="tab" aria-selected={cur === t.id} className={cur === t.id ? 'on' : ''} onClick={() => { if (t.id !== cur) { setMsgs([]); setCur(t.id) } }}>
+            <Avatar name={t.name} src={t.avatar} size={40} />
+            <span className="t"><strong>{t.name}</strong><small>{t.last ? t.last.slice(0, 60) : 'Nouvelle conversation'}</small></span>
             {t.unread > 0 && <span className="badge">{t.unread}</span>}
           </button>
         ))}
@@ -173,83 +206,31 @@ export function Messenger({ threads, setThreads, onReport, blocked = [], onBlock
       {th && (
         <div className="chatbox">
           <div className="chat-head">
-            <Avatar name={th.name} size={44} />
-            <div style={{ flex: 1, minWidth: '10rem' }}><strong style={{ fontSize: '1.05rem' }}>{th.name}</strong><p className="muted small" style={{ margin: 0 }}>À propos de : {th.about}</p></div>
+            <Avatar name={th.name} src={th.avatar} size={44} />
+            <div style={{ flex: 1, minWidth: '10rem' }}><strong style={{ fontSize: '1.05rem' }}>{th.name}</strong></div>
             <button className="btn btn-ghost btn-sm" onClick={() => onReport(th.name)}><Icon name="flag" size={16} /> Signaler</button>
-            {onBlock && !isBlocked && <button className="btn btn-ghost btn-sm danger-link" onClick={() => onBlock(th.name)}><Icon name="x" size={16} /> Bloquer</button>}
           </div>
           <div ref={box} className="bubbles">
-            <span className="chat-day">Conversation</span>
-            {th.msgs.map((m, i) => (
-              <div key={i} className={`bubble fade-swap${m.me ? ' me' : ''}${m.deleted ? ' deleted' : ''}`}>
-                {m.deleted
-                  ? <em>{m.me ? 'Vous avez supprimé ce message' : 'Message supprimé de votre côté'}</em>
-                  : askDel === i
-                    ? <span className="del-ask">{m.me ? 'Supprimer pour tout le monde ?' : 'Supprimer de votre côté ?'}
-                        <span><button type="button" onClick={() => remove(i)}>Oui, supprimer</button><button type="button" onClick={() => setAskDel(null)}>Non</button></span></span>
-                    : <>{m.text}<button type="button" className="del-btn" aria-label="Supprimer ce message" title="Supprimer" onClick={() => setAskDel(i)}><Icon name="trash" size={14} /></button></>}
-                <small>{m.me ? 'Vous' : th.name} · {m.at}</small>
-              </div>
-            ))}
+            {msgs.length === 0 && <span className="chat-day">Écrivez le premier message</span>}
+            {msgs.map(m => {
+              const me = m.sender_id === uid
+              return (
+                <div key={m.id} className={`bubble${me ? ' me' : ''}`}>
+                  {m.content}
+                  <small>{me ? 'Vous' : th.name} · {fmtStamp(m.created_at)}</small>
+                </div>
+              )
+            })}
           </div>
-          {isBlocked ? (
-            <div className="note warn" style={{ margin: '0.9rem 1rem', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span>Vous avez bloqué {th.name}. Cette personne ne peut plus vous écrire.</span>
-              {onUnblock && <button className="btn btn-ghost btn-sm" onClick={() => onUnblock(th.name)}>Débloquer</button>}
-            </div>
-          ) : (
-            <form className="chat-input" onSubmit={e => { e.preventDefault(); send() }}>
-              <input className="input input-pill" value={text} onChange={e => setText(e.target.value)} placeholder="Écrivez votre message…" maxLength={2000} aria-label="Message" />
-              <button className="btn btn-primary" type="submit" disabled={!text.trim()}>Envoyer</button>
-            </form>
-          )}
+          <form className="chat-input" onSubmit={e => { e.preventDefault(); send() }}>
+            <input className="input input-pill" value={text} onChange={e => setText(e.target.value)} placeholder="Écrivez votre message…" maxLength={2000} aria-label="Message" />
+            <button className="btn btn-primary" type="submit" disabled={!text.trim() || sending}>{sending ? 'Envoi…' : 'Envoyer'}</button>
+          </form>
+          {err && <p className="err" role="alert" style={{ margin: '0 1.1rem 0.6rem' }}>{err}</p>}
           <p className="muted small" style={{ margin: '0 1.1rem 0.9rem' }}>Pour votre sécurité, les numéros et emails sont masqués : restez sur Shareat pour discuter et payer.</p>
         </div>
       )}
     </div>
-  )
-}
-
-/** Fenêtre « Bloquer » : aucune justification demandée, la personne n'est pas prévenue. */
-export function BlockModal({ name, who, onClose, onYes }: { name: string; who: 'host' | 'guest'; onClose: () => void; onYes: () => void }) {
-  return (
-    <Confirm title={`Bloquer ${name} ?`} confirm="Bloquer" danger onNo={onClose} onYes={onYes}>
-      <p style={{ marginTop: 0 }}>Pas besoin de vous justifier. {name} ne sera pas prévenu(e).</p>
-      <ul style={{ paddingLeft: '1.2rem', margin: '0 0 0.6rem', lineHeight: 1.8 }}>
-        <li>Cette personne ne pourra plus vous écrire.</li>
-        {who === 'host'
-          ? <><li>Vous ne verrez plus ses repas.</li><li>Vos réservations chez elle restent valables : annulez-les si besoin.</li></>
-          : <><li>Elle ne pourra plus réserver vos repas.</li><li>Si elle a une réservation à venir chez vous, elle sera annulée et remboursée.</li></>}
-      </ul>
-      <p style={{ margin: 0 }}>Vous pourrez la débloquer à tout moment. En cas de danger ou de comportement grave, pensez aussi à la signaler.</p>
-    </Confirm>
-  )
-}
-
-/** Liste des personnes bloquées, avec « Débloquer ». */
-export function BlockedList({ blocked, onUnblock }: { blocked: string[]; onUnblock: (n: string) => void }) {
-  if (blocked.length === 0) return <p className="muted small" style={{ margin: '0.4rem 0' }}>Vous n’avez bloqué personne.</p>
-  return (
-    <>
-      {blocked.map(n => (
-        <div key={n} className="set-row"><div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}><Avatar name={n} size={36} /><strong>{n}</strong></div>
-          <button className="btn btn-ghost btn-sm" onClick={() => onUnblock(n)}>Débloquer</button></div>
-      ))}
-    </>
-  )
-}
-
-/** Réglages de notifications (liste d'interrupteurs). */
-export function NotificationSettings({ rows, toast }: { rows: { id: string; t: string; d: string; on: boolean }[]; toast: (m: string) => void }) {
-  const [n, setN] = useState<Record<string, boolean>>(() => Object.fromEntries(rows.map(r => [r.id, r.on])))
-  return (
-    <>
-      <Head title="Notifications" text="Choisissez ce que vous voulez recevoir, par email ou par SMS." />
-      {rows.map(r => (
-        <div key={r.id} className="set-row"><div><strong>{r.t}</strong><p>{r.d}</p></div>
-          <Toggle on={n[r.id]} onChange={v => { setN(p => ({ ...p, [r.id]: v })); toast(v ? 'Notification activée' : 'Notification désactivée') }} label={r.t} /></div>
-      ))}
-    </>
   )
 }
 
@@ -258,19 +239,38 @@ export function ReportModal({ name, onClose, onSent }: { name: string; onClose: 
   const [reason, setReason] = useState('')
   const [details, setDetails] = useState('')
   const reasons = ['Comportement irrespectueux', 'Demande de payer en dehors du site', 'Faux profil ou arnaque', 'Problème d’hygiène ou de sécurité', 'Autre']
+  // Le signalement part par email à l'équipe (la messagerie de l'appareil s'ouvre, déjà remplie).
+  const submit = () => {
+    const body = `Personne signalée : ${name}\nRaison : ${reason}\n\n${details.trim()}`
+    window.location.href = `mailto:${PUBLISHER.email}?subject=${encodeURIComponent(`Signalement : ${name}`)}&body=${encodeURIComponent(body)}`
+    onSent()
+  }
   return (
     <div className="backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <form className="modal" role="dialog" aria-modal="true" aria-label="Signaler" onSubmit={e => { e.preventDefault(); if (reason) onSent() }}>
+      <form className="modal" role="dialog" aria-modal="true" aria-label="Signaler" onSubmit={e => { e.preventDefault(); if (reason) submit() }}>
         <button type="button" className="modal-close" onClick={onClose} aria-label="Fermer">×</button>
         <h2 className="title">Signaler {name}</h2>
-        <p className="muted" style={{ marginTop: 0 }}>Votre signalement est confidentiel : la personne ne saura pas que c’est vous.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Votre signalement est confidentiel : la personne ne saura pas que c’est vous. Votre messagerie s’ouvre avec le message prêt à envoyer à l’équipe.</p>
         <div className="chips chips-wrap" role="radiogroup" aria-label="Raison" style={{ marginBottom: '1rem' }}>
           {reasons.map(r => <button type="button" key={r} role="radio" aria-checked={reason === r} className={`chip${reason === r ? ' on' : ''}`} onClick={() => setReason(r)}>{r}</button>)}
         </div>
         <textarea className="input" rows={3} value={details} onChange={e => setDetails(e.target.value)} placeholder="Racontez ce qui s’est passé (facultatif)" maxLength={1500} aria-label="Détails" />
-        <button className="btn btn-danger btn-block" type="submit" disabled={!reason} style={{ marginTop: '1rem' }}>Envoyer le signalement</button>
+        <button className="btn btn-danger btn-block" type="submit" disabled={!reason} style={{ marginTop: '1rem' }}>Préparer le signalement</button>
         <p className="muted small" style={{ marginTop: '0.8rem' }}>En cas de danger, appelez le 112.</p>
       </form>
     </div>
+  )
+}
+
+/** Affiché tant que l'utilisateur n'est pas chargé, ou si la base n'est pas reliée (développement). */
+export function SpaceGate({ state }: { state: 'loading' | 'in' | 'unconfigured' }) {
+  return (
+    <section className="section" style={{ paddingTop: '2rem' }}>
+      <div className="space-body glass" style={{ maxWidth: 640, margin: '0 auto' }}>
+        {state === 'unconfigured'
+          ? <div className="note warn"><Icon name="eye" size={18} /><span>La base de données n’est pas reliée (variables Supabase manquantes) : l’espace ne peut pas s’afficher.</span></div>
+          : <p className="muted" style={{ margin: 0 }}>Chargement de votre espace…</p>}
+      </div>
+    </section>
   )
 }

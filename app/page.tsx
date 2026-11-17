@@ -634,6 +634,20 @@ export default function Shareat() {
     if (m) openMeal(m)
   }
 
+  // Lien « /?repas=<id> » venant des espaces (favoris, prochains repas).
+  const repasOpened = useRef(false)
+  useEffect(() => {
+    if (repasOpened.current || meals.length === 0) return
+    const id = new URLSearchParams(window.location.search).get('repas')
+    if (!id) return
+    repasOpened.current = true
+    const m = meals.find(x => x.id === id)
+    window.history.replaceState({}, '', '/')
+    if (m) queueMicrotask(() => openMeal(m))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meals])
+
+
   const openConversation = (other: ConvUser) => {
     if (!user) { requireAuth('Connectez-vous pour envoyer un message'); return }
     if (other.id === user.id) { showToast('C’est votre propre table'); return }
@@ -940,11 +954,11 @@ export default function Shareat() {
         onNavigate={href => { if (href === '/') nav('home'); else if (href === '/?vue=explorer') nav('explore'); else if (href === '/?vue=carte') nav('map') }}
         account={user ? (
           <>
-            <button className="btn btn-ghost btn-sm" onClick={() => nav('messages')}>Messages</button>
-            <button className="nav-user" onClick={() => nav('dashboard')} title="Mon espace">
+            <Link className="btn btn-ghost btn-sm" href="/mon-compte?onglet=messages">Messages</Link>
+            <Link className="nav-user" href="/mon-compte" title="Mon espace">
               <span className="nav-user-name">{profile?.full_name?.split(' ')[0] || user.email?.split('@')[0]}</span>
               <Avatar name={profile?.full_name || user.email} size={34} />
-            </button>
+            </Link>
           </>
         ) : undefined}
       />
@@ -1489,7 +1503,7 @@ export default function Shareat() {
               ))}
             </div>
             <div className="center">
-              <button className="btn btn-primary" onClick={() => { if (user) { setDashTab('host'); nav('dashboard') } else { setAuthMode('signup'); setShowAuth(true) } }}>
+              <button className="btn btn-primary" onClick={() => { if (user) { router.push('/espace-hote') } else { setAuthMode('signup'); setShowAuth(true) } }}>
                 {user ? 'Proposer une table' : 'Créer mon compte hôte'}
               </button>
               <p className="muted small form-note">En publiant, vous vous engagez à respecter les <Link className="inline-link" href="/conditions">conditions d’utilisation</Link> (hygiène, allergènes, déclaration de vos revenus).</p>
@@ -1550,7 +1564,7 @@ export default function Shareat() {
                 <p className="muted small">L’adresse exacte est visible sur la page du repas et dans l’email de confirmation. Un rappel vous sera envoyé la veille.</p>
                 <div className="row-btns">
                   {bookingResult.meal && <button className="btn btn-primary" onClick={() => { const m = bookingResult.meal!; setBookingResult(null); openMeal(m) }}>Voir le repas et l’adresse</button>}
-                  <button className="btn btn-ghost" onClick={() => { setBookingResult(null); setDashTab('bookings'); nav('dashboard') }}>Mes réservations</button>
+                  <button className="btn btn-ghost" onClick={() => { setBookingResult(null); router.push('/mon-compte?onglet=reservations') }}>Mes réservations</button>
                 </div>
               </>
             ) : bookingResult.status === 'refunded' ? (

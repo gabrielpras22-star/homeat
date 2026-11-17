@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Icon from './Icons'
-import { supabaseConfigured } from '@/lib/supabase'
+import { supabase, supabaseConfigured } from '@/lib/supabase'
 
 /** Toutes les pages du site, dans l'ordre du menu. */
 export const NAV_LINKS: { href: string; label: string; icon: string }[] = [
@@ -41,6 +41,15 @@ export default function Header({ onNavigate, account, current }: { onNavigate?: 
   const here = current ?? pathname
   const [open, setOpen] = useState(false)
   const pillsRef = useRef<HTMLElement>(null)
+  const [signedIn, setSignedIn] = useState(false)
+
+  // Connecté ou non : on adapte les boutons du haut.
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    supabase.auth.getSession().then(({ data }) => setSignedIn(Boolean(data.session)))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setSignedIn(Boolean(session)))
+    return () => subscription.unsubscribe()
+  }, [])
 
   // Échap ferme le menu ; la page derrière ne défile pas pendant qu'il est ouvert.
   useEffect(() => {
@@ -69,7 +78,7 @@ export default function Header({ onNavigate, account, current }: { onNavigate?: 
     <>
       {!supabaseConfigured && (
         <p className="preview-band" role="note">
-          <Icon name="eye" size={16} /> Aperçu local : les comptes, repas et avis affichés sont des exemples, rien n’est enregistré.
+          <Icon name="eye" size={16} /> Aperçu local : la base de données n’est pas reliée, rien n’est enregistré.
         </p>
       )}
       <header className="nav">
@@ -79,12 +88,17 @@ export default function Header({ onNavigate, account, current }: { onNavigate?: 
           </button>
           <Link className="logo" href="/" onClick={() => click('/')} aria-label="Shareat, accueil">Shareat</Link>
           <div className="nav-actions">
-            {account ?? (
+            {account ?? (signedIn ? (
+              <>
+                <Link className="btn btn-ghost btn-sm" href="/espace-hote">Espace hôte</Link>
+                <Link className="btn btn-primary btn-sm" href="/mon-compte">Mon espace</Link>
+              </>
+            ) : (
               <>
                 <Link className="btn btn-ghost btn-sm" href="/connexion">Connexion</Link>
                 <Link className="btn btn-primary btn-sm" href="/inscription">Créer un compte</Link>
               </>
-            )}
+            ))}
           </div>
         </div>
         <nav ref={pillsRef} className="nav-links" aria-label="Pages du site">
@@ -103,10 +117,10 @@ export default function Header({ onNavigate, account, current }: { onNavigate?: 
             {NAV_LINKS.map(l => link(l, 'drawer-link', true))}
             <p className="drawer-title">Mon compte</p>
             {ACCOUNT_LINKS.map(l => link(l, 'drawer-link', true))}
-            <div className="drawer-btns">
+            {!signedIn && <div className="drawer-btns">
               <Link className="btn btn-ghost btn-block" href="/connexion" onClick={() => click('/connexion')}>Connexion</Link>
               <Link className="btn btn-primary btn-block" href="/inscription" onClick={() => click('/inscription')}>Créer un compte</Link>
-            </div>
+            </div>}
           </nav>
         </div>
       )}

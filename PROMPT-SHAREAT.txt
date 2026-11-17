@@ -9,7 +9,7 @@ Lis d'abord ce document en entier, puis README.md, AGENTS.md et le code avant de
 ---------------------------------------------------------------------
 1. OÙ EST LE CODE
 ---------------------------------------------------------------------
-- Dépôt GitHub : gabrielpras22-star/homeat
+- Dépôt GitHub : gabrielpras22-star/homeat (à renommer « shareat » ; GitHub redirige l'ancien nom)
 - Branche de travail : claude/homeat-project-recovery-w4ttzk (contient tout le travail récent).
   La branche main = production, encore sur l'ancienne version. Ne rien fusionner dans main
   sans mon accord explicite (« publie »).
@@ -41,6 +41,14 @@ app/page.tsx                 Application principale (client) : accueil, explorat
                              de publication, avis, modales. Composants définis HORS du rendu (règle lint).
 app/layout.tsx               Polices Italiana (titres) et Manrope (texte), CSS Leaflet, lang="fr".
 app/globals.css              Design « Minuit » (voir §5).
+app/espace-hote/HostSpace.tsx  Espace hôte (repas, photos, invités, avis, messages, revenus, versements),
+                             relié aux vraies données via lib/space.ts.
+app/mon-compte/GuestSpace.tsx  Espace invité (réservations, avis, favoris, messages, profil, sécurité).
+app/connexion, app/inscription  Connexion (retour vers ?suite=…, nouveau mot de passe) et inscription (code à 6 chiffres).
+app/aide, le-concept, comment-ca-marche, devenir-hote, confiance-securite : pages d'information.
+app/components/site/*        En-tête, pied de page, éléments communs ; app/components/space/Kit.tsx : briques des espaces
+                             (messagerie réelle, signalement par email, mise en page).
+lib/space.ts                 Lecture/écriture Supabase des espaces (aucune donnée inventée).
 app/components/MealMap.tsx   Carte Leaflet (import dynamique, zone approximative de ~1 km).
 app/components/LegalPage.tsx Gabarit des pages légales.
 app/mentions-legales, app/conditions (CGU/CGV), app/confidentialite : pages légales.
@@ -122,6 +130,10 @@ RESEND_API_KEY, EMAIL_FROM.
 - Points juridiques : pas de SIRET à ce jour (à ajouter dans lib/legal.ts dès qu'il existe) ;
   une relecture juridique des CGU/CGV est conseillée ; l'offre gratuite de Vercel (Hobby)
   interdit l'usage commercial (passer à Vercel Pro avant d'encaisser).
+- Supabase → Authentication → Email Templates → « Confirm signup » : le modèle doit contenir {{ .Token }}
+  (code à 6 chiffres demandé par la page d'inscription), et « Reset password » renvoie vers /connexion.
+- Pas encore de blocage d'utilisateurs, de double vérification, ni de réglage des notifications :
+  ces fonctions ont été retirées tant qu'elles n'ont pas de vraie mise en œuvre.
 - Une démo fictive (fausses annonces) existe à part, sous forme de page HTML ; elle ne fait pas
   partie du site.
 

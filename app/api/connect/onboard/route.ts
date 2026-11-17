@@ -37,8 +37,8 @@ export async function POST(request: Request) {
         type: 'account_onboarding',
         account_onboarding: {
           configurations: ['recipient'],
-          refresh_url: `${origin}/?versements=relancer`,
-          return_url: `${origin}/?versements=retour`,
+          refresh_url: `${origin}/espace-hote?versements=relancer`,
+          return_url: `${origin}/espace-hote?versements=retour`,
         },
       },
     })

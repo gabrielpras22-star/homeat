@@ -6,20 +6,34 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/site/Icons'
 import PasswordField from '../components/site/PasswordField'
 import { supabase, supabaseConfigured } from '@/lib/supabase'
-import { createThrottle, emailOk } from '@/lib/security'
+import { createThrottle, emailOk, passwordOk } from '@/lib/security'
 
-type Mode = 'login' | 'forgot' | 'sent'
+type Mode = 'login' | 'forgot' | 'sent' | 'reset'
+
+/** Page où revenir après connexion (chemin interne uniquement). */
+function nextPath() {
+  const s = new URLSearchParams(window.location.search).get('suite') || ''
+  return /^\/(?!\/)[\w\-/?=&%.]*$/.test(s) ? s : '/mon-compte'
+}
 
 export default function LoginForm() {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
-  const [remember, setRemember] = useState(true)
+  const [pw2, setPw2] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [lockLeft, setLockLeft] = useState(0)
   const throttle = useRef(createThrottle(5, 30_000))
+
+  // Lien « mot de passe oublié » : Supabase ouvre une session de récupération, on demande le nouveau mot de passe.
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(event => {
+      if (event === 'PASSWORD_RECOVERY') { setError(''); setMode('reset') }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
   // Compte à rebours pendant le blocage après trop d'essais.
   useEffect(() => {
@@ -33,12 +47,10 @@ export default function LoginForm() {
     const wait = throttle.current.remainingMs()
     if (wait > 0) { setLockLeft(Math.ceil(wait / 1000)); return }
     if (!emailOk(email) || !pw) { setError('Tapez votre email et votre mot de passe.'); return }
+    if (!supabaseConfigured) { setError('La base de données n’est pas reliée : connexion impossible.'); return }
     setBusy(true)
-    let ok = !supabaseConfigured // aperçu : toute connexion valide
-    if (supabaseConfigured) {
-      const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: pw })
-      ok = !e
-    }
+    const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: pw })
+    const ok = !e
     setBusy(false)
     if (!ok) {
       throttle.current.fail()
@@ -49,6 +61,17 @@ export default function LoginForm() {
       return
     }
     throttle.current.reset()
+    router.push(nextPath())
+  }
+
+  const reset = async () => {
+    setError('')
+    if (!passwordOk(pw)) { setError('Le mot de passe ne respecte pas toutes les règles.'); return }
+    if (pw !== pw2) { setError('Les deux mots de passe sont différents.'); return }
+    setBusy(true)
+    const { error: e } = await supabase.auth.updateUser({ password: pw })
+    setBusy(false)
+    if (e) { setError('Changement impossible : ' + e.message + '. Redemandez un lien.'); return }
     router.push('/mon-compte')
   }
 
@@ -70,12 +93,10 @@ export default function LoginForm() {
           <form onSubmit={e => { e.preventDefault(); login() }} noValidate>
             <p className="eyebrow">Bon retour</p>
             <h1 className="title">Connexion</h1>
-            {!supabaseConfigured && <div className="note warn"><Icon name="eye" size={18} /><span>Aperçu : tapez n’importe quel email et mot de passe pour visiter l’espace.</span></div>}
             <label className="field"><span className="field-label">Email</span>
               <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" maxLength={254} placeholder="vous@exemple.fr" /></label>
             <PasswordField label="Mot de passe" value={pw} onChange={setPw} autoComplete="current-password" showRules={false} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginTop: '-0.3rem' }}>
-              <label className="check" style={{ margin: 0 }}><input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} /><span>Rester connecté</span></label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginTop: '-0.3rem' }}>
               <button type="button" className="link" onClick={() => { setError(''); setMode('forgot') }}>Mot de passe oublié ?</button>
             </div>
             {lockLeft > 0 && <p className="err" role="alert"><Icon name="clock" size={16} /> Trop d’essais. Pour votre sécurité, attendez {lockLeft} secondes.</p>}
@@ -83,7 +104,7 @@ export default function LoginForm() {
             <button type="submit" className="btn btn-primary btn-block btn-lg" style={{ marginTop: '1rem' }} disabled={busy || lockLeft > 0}>{busy ? 'Connexion…' : 'Se connecter'}</button>
             <div className="divider">ou</div>
             <Link className="btn btn-ghost btn-block" href="/inscription">Créer un compte</Link>
-            <p className="muted small" style={{ marginTop: '1.2rem', lineHeight: 1.6 }}>Sur un ordinateur partagé, décochez « Rester connecté ». Si la double vérification est activée, un code vous sera demandé.</p>
+            <p className="muted small" style={{ marginTop: '1.2rem', lineHeight: 1.6 }}>Sur un ordinateur partagé, pensez à vous déconnecter depuis votre espace en partant.</p>
           </form>
         )}
 
@@ -97,6 +118,17 @@ export default function LoginForm() {
             {error && <p className="err" role="alert"><Icon name="x" size={16} /> {error}</p>}
             <button type="submit" className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Envoi…' : 'Recevoir le lien'}</button>
             <button type="button" className="btn btn-ghost btn-block" style={{ marginTop: '0.6rem' }} onClick={() => setMode('login')}><Icon name="back" size={18} /> Retour à la connexion</button>
+          </form>
+        )}
+
+        {mode === 'reset' && (
+          <form onSubmit={e => { e.preventDefault(); reset() }} noValidate>
+            <p className="eyebrow">Dernière étape</p>
+            <h1 className="title">Nouveau mot de passe</h1>
+            <PasswordField label="Nouveau mot de passe" value={pw} onChange={setPw} autoComplete="new-password" />
+            <PasswordField label="Retapez-le" value={pw2} onChange={setPw2} autoComplete="new-password" showRules={false} />
+            {error && <p className="err" role="alert"><Icon name="x" size={16} /> {error}</p>}
+            <button type="submit" className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer et me connecter'}</button>
           </form>
         )}
 
